@@ -1,0 +1,85 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit config for the feedBack Arrangement Editor plugin. This repo
+# already leans on CodeRabbit heavily in practice (see inline comments
+# citing specific CodeRabbit PR findings, e.g. src/hit-test.js, src/audio.js)
+# — this file exists to stop it from re-flagging patterns that are already
+# deliberate engineering decisions, documented in eslint.config.mjs's own
+# extensive comments and this repo's test suite.
+
+language: en-US
+early_access: false
+
+tone_instructions: >-
+  This repo is developed by a solo maintainer working with Claude Code
+  agents, with real regression history behind several of its lint/test
+  choices (see eslint.config.mjs's header comments for two shipped bugs
+  that motivated specific rules). Trust that history over generic style
+  preferences. Prioritize correctness — this plugin parses untrusted GP/MIDI
+  imports and does real-time audio/timing math — over broad refactors.
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!**/*.min.js"
+    - "!**/node_modules/**"
+    - "!CHANGELOG.md"
+  path_instructions:
+    - path: "src/**/*.js"
+      instructions: |
+        Real ES modules (`import`/`export`), loaded via `screen.js`'s
+        `import './src/main.js'` — `plugin.json` sets `scriptType:
+        "module"`. This is a genuine module graph (unlike sibling
+        Slopsmith-ecosystem plugins that stay single-file IIFEs), so
+        cross-module imports are expected, not a sign the file should be
+        merged.
+
+        This repo's `eslint.config.mjs` encodes two specific real bugs it
+        was written to catch — don't relitigate its choices without reading
+        that file's header comments first:
+        - `no-undef` with `{ typeof: true }` is deliberately ON (catches
+          `typeof someUndeclaredName` silently returning `'undefined'`,
+          which shipped a real bug once). Don't suggest removing it.
+        - `no-unused-vars` is deliberately a WARNING, not an error, because
+          some declarations are only reachable from tests that slice them
+          out of the source text via string parsing — ratcheting to error
+          would mean deleting code the suite still covers. Don't suggest
+          promoting it to error without also checking `tests/`.
+
+        Do flag: real correctness bugs (off-by-one timing math, unguarded
+        null derefs on optional host-provided data), not style choices the
+        lint config already made deliberately.
+    - path: "routes.py"
+      instructions: |
+        FastAPI backend, exports `setup(app, context)`. Logging goes
+        through `logging.getLogger("slopsmith.plugin.editor")` created
+        ad hoc where needed (this repo does not receive an injected
+        `context["log"]`) — that's the established pattern, not a missing
+        dependency injection. `context.get("load_sibling")` (and other
+        `context.get(...)` calls) are deliberately optional/feature-detected
+        against `plugin.json`'s `minHost` version gate — don't flag `.get()`
+        with a fallback as unnecessary defensiveness; flag it only if the
+        fallback path is actually broken. The legacy-static-dir vs.
+        config-dir cache fallback near the top of `setup()` is intentional
+        (desktop bundles ship a read-only static dir) — don't flag the dual
+        code path as dead code.
+    - path: "tests/**"
+      instructions: |
+        Plain Node test runner (`node --test`), no Jest/Vitest — deliberate
+        zero-devDependency choice. Don't suggest migrating frameworks.
+    - path: "docs/**"
+      instructions: |
+        Reference documentation (USER-GUIDE.md, plugin-modules.md). Skip
+        code-quality nits; only flag factual drift from the actual
+        implementation if you can verify it against the diff.
+
+chat:
+  auto_reply: true
