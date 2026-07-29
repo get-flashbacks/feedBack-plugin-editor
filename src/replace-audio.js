@@ -7,12 +7,18 @@ import { cancelAudioLoad, loadAudio, stopPlayback } from './audio.js';
 import { _uploadAudioForMode, createState } from './create.js';
 import { _editorApplyScrollBounds } from './loop.js';
 import { S, markSessionDirty } from './state.js';
-import { setStatus } from './ui.js';
+import { _installModalKeyboard, setStatus } from './ui.js';
 import { host } from './host.js';
 
 let replaceAudioState = { audioMode: 'file' };
 let replaceAudioRequest = 0;
 let replaceAudioLoadRequest = 0;
+
+// This modal is static (screen.html), not rebuilt per open like the
+// dynamically-created ones _installModalKeyboard was originally written for
+// — so install its Escape/focus-trap handling once, lazily, on first show
+// rather than re-attaching a fresh keydown listener on every open.
+let _kbInstalled = false;
 
 function _replaceAudioRequestIsCurrent(request, sessionId) {
     return request === replaceAudioRequest && S.sessionId === sessionId;
@@ -35,7 +41,12 @@ export function editorShowReplaceAudioModal() {
     document.getElementById('editor-replace-yt-url').value = '';
     document.getElementById('editor-replace-audio-status').textContent = '';
     document.getElementById('editor-replace-audio-apply').disabled = false;
-    document.getElementById('editor-replace-audio-modal').classList.remove('hidden');
+    const modal = document.getElementById('editor-replace-audio-modal');
+    modal.classList.remove('hidden');
+    if (!_kbInstalled) {
+        _kbInstalled = true;
+        _installModalKeyboard(modal, modal.firstElementChild, editorHideReplaceAudioModal);
+    }
     editorSetReplaceAudioMode('file');
 }
 

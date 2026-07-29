@@ -14,6 +14,16 @@ function element(id) {
         elements.set(id, {
             id, value: '', textContent: '', disabled: false, files: [],
             classList: noopClassList,
+            // _installModalKeyboard (now wired on the Replace Audio modal, an
+            // improvement-plan P1 rollout item) reads addEventListener/
+            // tabIndex/firstElementChild/querySelector off the modal and its
+            // inner panel — stub them so editorShowReplaceAudioModal doesn't
+            // crash in this DOM-less harness.
+            addEventListener() {},
+            removeEventListener() {},
+            tabIndex: 0,
+            querySelector: () => null,
+            get firstElementChild() { return element(id + ':inner'); },
         });
     }
     return elements.get(id);
