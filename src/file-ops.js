@@ -26,7 +26,7 @@ import { _tourResetForLoad } from './tour.js';
 import { installTrackSession, trackSessionSavePayload } from './track-session.js';
 import { _resetSignpostCounters } from './signposts.js';
 import { surfaceMigrateFilename, surfaceOnSongLoaded } from './toolbars.js';
-import { _editorEscHtml, setStatus } from './ui.js';
+import { _editorEscHtml, _installModalKeyboard, setStatus } from './ui.js';
 import { host } from './host.js';
 
 // How many loads are in flight. The entry landing is armed by a timer on screen
@@ -44,6 +44,7 @@ let externalSaveHandle = null;
 let externalSaveSessionId = null;
 let packLoadController = null;
 let packLoadGeneration = 0;
+let _saveFormatKbInstalled = false;
 
 export function _externalSaveHandleIsCurrentPure(handleSessionId, sessionId) {
     return !!handleSessionId && handleSessionId === sessionId;
@@ -805,7 +806,17 @@ export async function saveCDLC(options = {}) {
     // pushed past those limits while editing, ask them whether to spill
     // into a new .sloppak or accept the truncation before we touch disk.
     if (S.format === 'archive' && _activeArrangementExceedsArchiveLimit()) {
-        document.getElementById('editor-save-format-modal').classList.remove('hidden');
+        const modal = document.getElementById('editor-save-format-modal');
+        modal.classList.remove('hidden');
+        // Static screen.html modal, not rebuilt per open like the
+        // dynamically-created ones _installModalKeyboard was originally
+        // written for — install its Escape/focus-trap handling once, lazily,
+        // on first show rather than re-attaching a fresh keydown listener on
+        // every open.
+        if (!_saveFormatKbInstalled) {
+            _saveFormatKbInstalled = true;
+            _installModalKeyboard(modal, modal.firstElementChild, editorHideSaveFormatModal);
+        }
         return false;
     }
     setStatus('Saving...');
