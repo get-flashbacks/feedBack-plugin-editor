@@ -15,9 +15,15 @@ export function showAddNote(cx, cy, time, string, fret) {
     const isKeys = isKeysMode();
     addNoteData = { time, string, fret, isKeys };
     const dlg = document.getElementById('editor-add-note-dialog');
-    dlg.style.left = cx + 'px';
-    dlg.style.top = cy + 'px';
+    // Clamp against the viewport so a double-click near the bottom/right edge
+    // doesn't render the dialog partly (or wholly) off-screen. Remove `hidden`
+    // first so offsetWidth/offsetHeight reflect the real rendered size instead
+    // of the display:none 0x0 fallback.
     dlg.classList.remove('hidden');
+    const dlgW = dlg.offsetWidth || 0;
+    const dlgH = dlg.offsetHeight || 0;
+    dlg.style.left = Math.max(0, Math.min(cx, window.innerWidth - dlgW)) + 'px';
+    dlg.style.top = Math.max(0, Math.min(cy, window.innerHeight - dlgH)) + 'px';
 
     document.getElementById('editor-add-fret-col').classList.toggle('hidden', isKeys);
     document.getElementById('editor-add-pitch-col').classList.toggle('hidden', !isKeys);

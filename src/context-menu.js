@@ -100,9 +100,17 @@ export function showContextMenu(cx, cy, idx) {
         btn.onclick = () => { hideContextMenu(); actionItem.action(); };
     });
 
-    menu.style.left = cx + 'px';
-    menu.style.top = cy + 'px';
+    // Clamp against the viewport so a right-click near the bottom/right edge
+    // doesn't render the menu partly (or wholly) off-screen. Remove the
+    // `hidden` class first so offsetWidth/offsetHeight reflect the real
+    // rendered size instead of the display:none 0x0 fallback.
     menu.classList.remove('hidden');
+    const menuW = menu.offsetWidth || 0;
+    const menuH = menu.offsetHeight || 0;
+    const clampedX = Math.max(0, Math.min(cx, window.innerWidth - menuW));
+    const clampedY = Math.max(0, Math.min(cy, window.innerHeight - menuH));
+    menu.style.left = clampedX + 'px';
+    menu.style.top = clampedY + 'px';
 }
 export function hideContextMenu() {
     document.getElementById('editor-context-menu').classList.add('hidden');
