@@ -72,6 +72,15 @@ class _FakeApp:
     def post(self, path, *a, **k):
         return self._register(path)
 
+    def on_event(self, name, *a, **k):
+        # The idle-session sweep registers an @app.on_event("startup") hook
+        # (improvement-plan P2). This fake app doesn't run a real event loop
+        # for these tests, so just accept the registration without invoking
+        # it — nothing here exercises session eviction.
+        def decorator(fn):
+            return fn
+        return decorator
+
 
 @pytest.fixture()
 def load_song_route(tmp_path):

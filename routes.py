@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import math
 import os
 import re
@@ -4233,6 +4234,56 @@ def setup(app, context):
         if session.get("format") != "sloppak":
             shutil.rmtree(session.get("dir", ""), ignore_errors=True)
         return True
+
+    # ── Idle session eviction ───────────────────────────────────────────
+    #
+    # The `sessions` dict above had no TTL eviction — the only cleanup was
+    # POST /session/close, fired best-effort from the frontend's
+    # disposeBackendSession() (src/session-lifecycle.js), which never runs on
+    # a crashed tab / closed browser / lost network. Long-running server
+    # instances would accumulate abandoned sessions (and their temp sandbox
+    # dirs) indefinitely. Every route that touches a session already stamps
+    # `last_touched` (see save_song, etc.), so idle time is simply
+    # `time.time() - session["last_touched"]`.
+    #
+    # This mirrors the ancestor's own periodic sweep (background task, 5-min
+    # sleep, 1-hour idle threshold) rather than the demo-mode janitor
+    # (lib/demo_mode.py's register_demo_janitor_hook), which only runs when
+    # FEEDBACK_DEMO_MODE is set and is therefore not a substitute for normal
+    # production operation. _dispose_editor_session already carries the
+    # shared-extraction-cache exemption (sloppak sessions' `dir` is never
+    # removed), so the sweep reuses it unchanged rather than re-deriving the
+    # exemption.
+    _SESSION_IDLE_TTL_SECS = 60 * 60       # evict sessions idle longer than 1 hour
+    _SESSION_SWEEP_INTERVAL_SECS = 5 * 60  # check every 5 minutes
+
+    async def _sweep_idle_editor_sessions():
+        now = time.time()
+        # Snapshot ids before disposing — _dispose_editor_session mutates
+        # `sessions`, so iterating it directly while evicting would be
+        # modifying the dict during iteration.
+        stale_ids = [
+            sid for sid, session in sessions.items()
+            if now - session.get("last_touched", now) > _SESSION_IDLE_TTL_SECS
+        ]
+        for sid in stale_ids:
+            _dispose_editor_session(sid)
+
+    async def _editor_session_sweep_loop():
+        while True:
+            await asyncio.sleep(_SESSION_SWEEP_INTERVAL_SECS)
+            try:
+                await _sweep_idle_editor_sessions()
+            except Exception:
+                # A sweep failure must never kill the loop — log and retry
+                # on the next interval rather than silently stopping all
+                # future eviction for the life of the process.
+                logging.getLogger("feedBack.editor").exception(
+                    "editor session sweep failed")
+
+    @app.on_event("startup")
+    async def _start_editor_session_sweep():
+        asyncio.create_task(_editor_session_sweep_loop())
 
     @app.post("/api/plugins/editor/session/close")
     async def close_editor_session(data: dict):
