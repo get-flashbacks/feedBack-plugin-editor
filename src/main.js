@@ -6,7 +6,7 @@ import {
 import {
     PIANO_NOTE_NAMES
 } from './theory.js';
-import { DPR, canvas, ctx, setCanvas } from './canvas.js';
+import { DPR, _watchDpr, canvas, ctx, setCanvas } from './canvas.js';
 import {
 } from './position.js';
 
@@ -2328,6 +2328,13 @@ function init() {
 
     resizeCanvas();
     _globalListeners.add(window, 'resize', resizeCanvas);
+    // Dragging the window to a monitor with a different scale factor (or an
+    // OS/browser zoom change) changes devicePixelRatio WITHOUT firing a
+    // window 'resize' — canvas.js's cached DPR was never refreshed for this,
+    // so the canvas kept rendering at the old pixel density. resizeCanvas()
+    // reads the live DPR binding to re-derive canvas.width/height off the
+    // new value.
+    _watchDpr(() => resizeCanvas());
     // src/create.js's global 'input' listener. It used to be a top-level
     // statement in this file; a module must not have import-time side effects.
     initCreate();
