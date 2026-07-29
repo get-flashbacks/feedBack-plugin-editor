@@ -8,7 +8,7 @@
 // effectiveAudioOffset) routes through host.
 
 import { S, markSessionDirty } from './state.js';
-import { _editorEscHtml, _editorPromptText, setStatus } from './ui.js';
+import { _editorEscHtml, _editorPromptText, _installModalKeyboard, setStatus } from './ui.js';
 import { flattenChords } from './chords.js';
 import { KEYS_PATTERN } from './keys.js';
 import { _arrTypeKind, _typeKind } from './instrument.js';
@@ -293,9 +293,20 @@ export async function editorRemoveArrangement() {
 // Cleared on every modal-open and on every fresh file selection.
 let _addDrumsFile = null;  // { kind: 'gp' | 'midi', path: string }
 
+// This modal is static (screen.html), not rebuilt per open like the
+// dynamically-created ones _installModalKeyboard was originally written for
+// — so install its Escape/focus-trap handling once, lazily, on first show
+// rather than re-attaching a fresh keydown listener on every open.
+let _addDrumsKbInstalled = false;
+
 export function editorShowAddDrumsModal() {
     _addDrumsFile = null;
-    document.getElementById('editor-add-drums-modal').classList.remove('hidden');
+    const modal = document.getElementById('editor-add-drums-modal');
+    modal.classList.remove('hidden');
+    if (!_addDrumsKbInstalled) {
+        _addDrumsKbInstalled = true;
+        _installModalKeyboard(modal, modal.firstElementChild, editorHideAddDrumsModal);
+    }
     document.getElementById('editor-add-drums-tracks').classList.add('hidden');
     document.getElementById('editor-add-drums-go').disabled = true;
     document.getElementById('editor-add-drums-status').textContent = '';
