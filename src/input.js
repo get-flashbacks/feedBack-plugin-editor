@@ -1986,17 +1986,17 @@ export function onKeyDown(e) {
     }
     // Ctrl+Alt+Z — undo to the last checkpoint. Must precede the plain Ctrl+Z
     // below (which doesn't exclude Alt, so it would otherwise swallow this).
-    if ((e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+    if ((e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z') && !_editorIsTypingTarget(e)) {
         e.preventDefault();
         window.editorUndoToCheckpoint();
         return;
     }
-    if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !_editorIsTypingTarget(e)) {
         e.preventDefault();
         window.editorUndo();
         return;
     }
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'Z'))) {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'Z')) && !_editorIsTypingTarget(e)) {
         e.preventDefault();
         window.editorRedo();
         return;
