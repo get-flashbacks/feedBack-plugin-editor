@@ -1845,6 +1845,14 @@ window.editorNudgeOffset = (delta) => {
     window.editorApplyOffset(el.value);
 };
 window.editorSelectArrangement = (val) => {
+    // A context menu or add-note popover left open on the OUTGOING arrangement
+    // holds an idx into ITS notes() array. If the switch happens via the
+    // <select> element (outside the canvas), mouse.js's click-based auto-close
+    // never fires, so the stale idx would carry over into the new
+    // arrangement's notes() and corrupt/misapply an action there. Close both
+    // unconditionally before switching.
+    hideContextMenu();
+    hideAddNote();
     // Flush the OUTGOING arrangement's live suggested marks to its keyed store
     // before switching, so localStorage tracks the WeakSet (an Accept/position
     // move that cleared a mark since the last save isn't resurrected when we
@@ -1884,6 +1892,12 @@ window.editorSelectArrangement = (val) => {
 // mode and selects it. editorSelectArrangement stays drums-unaware so its other
 // callers — undo replay, the Tracks row — are unchanged.
 window.editorSwitcherSelect = (val) => {
+    // Close any popover left open on the OUTGOING arrangement before the
+    // switch — the drums branch below returns without ever reaching
+    // editorSelectArrangement (which also closes them), so a stale idx into
+    // the old arrangement's notes() could otherwise survive the switch.
+    hideContextMenu();
+    hideAddNote();
     const idx = parseInt(val) || 0;
     if (isDrumArrangement(S.arrangements[idx])) {
         // A drum part: open the drum grid as a MODE (currentArr stays pitched)

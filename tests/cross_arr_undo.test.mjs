@@ -76,6 +76,7 @@ function makeEnv() {
     const env = new Function(
         'window', 'document', 'S', 'flattenChords', 'isKeysMode',
         'updatePianoRange', 'draw', 'updateStatus', 'setStatus', 'notes',
+        'hideContextMenu', 'hideAddNote',
         '"use strict";'
         + ensureArr + '\n' + selectArr + '\n'
         + 'return { _historyEnsureArr };'
@@ -90,6 +91,8 @@ function makeEnv() {
         () => {},
         () => {},
         notes,
+        () => {},
+        () => {},
     );
     setHostHooks({ ensureArr: env._historyEnsureArr, draw: () => {}, updateStatus: () => {} });
     S.history = new EditHistory();
