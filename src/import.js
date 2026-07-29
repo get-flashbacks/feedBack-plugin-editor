@@ -7,7 +7,7 @@
 // `_showDrumImportUnmappedModal` — is exported for it to import.
 
 import { S, markSessionDirty } from './state.js';
-import { _editorEscHtml, setStatus } from './ui.js';
+import { _editorEscHtml, _installModalKeyboard, setStatus } from './ui.js';
 import { ReplaceArrangementChartCmd } from './commands.js';
 import { TempoGridCmd, _tempoRemapMarksByTime } from './tempo.js';
 import { DRUM_PIECE_META, DRUM_PIECE_ORDER, _drumImportHitPure } from './drum.js';
@@ -45,9 +45,21 @@ function _midiKeysArrNamePure(trackName, fallbackIndex) {
 /* @pure:midi-unpack:end */
 export { _midiKeysArrNamePure };
 
+// Both static modals below are screen.html DOM, not rebuilt per open like the
+// dynamically-created ones _installModalKeyboard was originally written for
+// — so install each's Escape/focus-trap handling once, lazily, on first show
+// rather than re-attaching a fresh keydown listener on every open.
+let _addKeysKbInstalled = false;
+let _importGuitarKbInstalled = false;
+
 export function editorShowAddKeysModal() {
     if (S.format !== 'sloppak') return;
-    document.getElementById('editor-add-keys-modal').classList.remove('hidden');
+    const modal = document.getElementById('editor-add-keys-modal');
+    modal.classList.remove('hidden');
+    if (!_addKeysKbInstalled) {
+        _addKeysKbInstalled = true;
+        _installModalKeyboard(modal, modal.firstElementChild, editorHideAddKeysModal);
+    }
     document.getElementById('editor-add-keys-tracks').classList.add('hidden');
     document.getElementById('editor-add-keys-go').disabled = true;
     document.getElementById('editor-add-keys-status').textContent = '';
@@ -688,7 +700,12 @@ function _guitarImportName(track, existingNames) {
 
 export function editorShowImportGuitarModal() {
     if (S.format !== 'sloppak' || !S.sessionId) return;
-    document.getElementById('editor-import-guitar-modal').classList.remove('hidden');
+    const modal = document.getElementById('editor-import-guitar-modal');
+    modal.classList.remove('hidden');
+    if (!_importGuitarKbInstalled) {
+        _importGuitarKbInstalled = true;
+        _installModalKeyboard(modal, modal.firstElementChild, editorHideImportGuitarModal);
+    }
     document.getElementById('editor-import-guitar-tracks').classList.add('hidden');
     document.getElementById('editor-import-guitar-dest').classList.add('hidden');
     document.getElementById('editor-import-guitar-go').disabled = true;
