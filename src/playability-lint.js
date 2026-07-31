@@ -52,10 +52,18 @@ export const LINT_DEFAULT_WINDOW = 4;         // anchor width when none authored
 
 // Keys (piano) thresholds — the pedagogy seat's numbers. Semitone spans.
 export const KEYS_SPAN_WARN = 12;   // over an OCTAVE in one hand — a real stretch
-export const KEYS_SPAN_ERR = 16;    // over a 10th — beyond most hands (large-hand exception: TODO)
+export const KEYS_SPAN_ERR = 16;    // over a 10th — beyond most hands
+export const KEYS_SPAN_ERR_LARGE_HAND = 20;  // large-hand exception — extended reach for players with larger hands
 export const KEYS_HAND_MAX = 5;     // five fingers; more than five in one hand at once is impossible
 export const KEYS_MUDDY_LOW_MIDI = 40;  // ~E2 — dense voicings below here turn to mud
 export const KEYS_MUDDY_INTERVAL = 4;   // two lowest within a major 3rd = a muddy close voicing
+
+// Large-hand exception setting — set to true to use the extended threshold
+export let enableLargeHandException = false;
+
+export function setLargeHandException(enabled) {
+    enableLargeHandException = enabled;
+}
 
 // The fret-hand anchor list: authored anchors win, computed fall back —
 // the same dual-list precedence the tempo remap and the roll resolver use.
@@ -282,6 +290,7 @@ export function _keysLintPure(nn) {
         .filter((e) => e.n && Number.isFinite(e.n.time)
             && Number.isInteger(e.n.string) && Number.isInteger(e.n.fret))
         .sort((a, b) => a.n.time - b.n.time);
+    const spanErrThreshold = enableLargeHandException ? KEYS_SPAN_ERR_LARGE_HAND : KEYS_SPAN_ERR;
     let k = 0;
     while (k < order.length) {
         const t0 = order[k].n.time;
@@ -298,7 +307,7 @@ export function _keysLintPure(nn) {
                 if (span > KEYS_SPAN_WARN) {
                     issues.push({
                         rule: 'keys-span', time: t0, indices: group.map((e) => e.i),
-                        detail: span > KEYS_SPAN_ERR
+                        detail: span > spanErrThreshold
                             ? `${span}-semitone reach in one hand (beyond a 10th)`
                             : `${span}-semitone reach in one hand (over an octave)`,
                     });
