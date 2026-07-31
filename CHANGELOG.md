@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lint — a yellow underline + the count chip + the popover, never blocking. New
   pures `_keysLintPure` / thresholds in `src/playability-lint.js`, covered by
   `tests/keys_lint.test.mjs`.
+- **Large-hand exception for keys playability lint.** Players with larger hands
+  can now enable an extended hand-span threshold (20 semitones vs. standard 16)
+  via the new `setLargeHandException()` function, reducing false-positive "beyond
+  a 10th" warnings for legitimate hand reaches. Configurable threshold allows the
+  editor to accommodate a broader range of player hand sizes.
 - **Audio regions — a stem's audio can now be placed and trimmed as movable
   blocks (Track Regions PR4).** Audio playback becomes one source *per region*
   instead of one per stem: a region plays only its media window `[srcIn, srcOut)`
