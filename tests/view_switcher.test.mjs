@@ -371,6 +371,8 @@ function makeSwitcher() {
         updateArrangementSelector: () => { selectorSyncs++; },
         draw: () => {},
         updateStatus: () => {},
+        hideContextMenu: () => {},
+        hideAddNote: () => {},
         window: { editorSelectArrangement: (v) => { S.currentArr = parseInt(v) || 0; } },
     });
     return { fn, counts: { get selectorSyncs() { return selectorSyncs; } } };

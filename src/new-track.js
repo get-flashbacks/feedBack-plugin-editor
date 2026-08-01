@@ -17,7 +17,7 @@
  */
 
 import { S } from './state.js';
-import { setStatus } from './ui.js';
+import { _installModalKeyboard, setStatus } from './ui.js';
 import { editorAddEmptyFretted, editorAddEmptyKeys, editorShowAddKeysModal, editorShowImportGuitarModal } from './import.js';
 import { _canAddAnotherDrums, editorAddEmptyDrums, editorShowAddDrumsModal } from './arrangement.js';
 import { editorToggleStemTracks } from './stem-tracks.js';
@@ -56,6 +56,12 @@ export function _newTrackPlanPure(sel, ctx) {
 
 // Dialog selection state (module-local; re-seeded on every open).
 let _sel = { type: 'transcription', instrument: 'Lead', source: 'empty' };
+
+// This modal is static (screen.html), not rebuilt per open like the
+// dynamically-created ones _installModalKeyboard was originally written for
+// — so install its Escape/focus-trap handling once, lazily, on first show
+// rather than re-attaching a fresh keydown listener on every open.
+let _kbInstalled = false;
 
 function _byId(id) { return document.getElementById(id); }
 
@@ -104,7 +110,12 @@ export function editorShowNewTrackModal() {
     _sel = { type: 'transcription', instrument: 'Lead', source: 'empty' };
     const status = _byId('editor-new-track-status');
     if (status) status.textContent = '';
-    _byId('editor-new-track-modal').classList.remove('hidden');
+    const modal = _byId('editor-new-track-modal');
+    modal.classList.remove('hidden');
+    if (!_kbInstalled) {
+        _kbInstalled = true;
+        _installModalKeyboard(modal, modal.firstElementChild, editorHideNewTrackModal);
+    }
     _renderNewTrackModal();
 }
 

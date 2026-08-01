@@ -2608,11 +2608,31 @@ async function _editorDoEofCreate() {
     }
 }
 
+// Guards editorBuild() against double-submit — the "Export to Library" button
+// (screen.html's editor-build-btn) has no other in-flight tracking, and unlike
+// the ~20 other async actions in this file (each toggling its own btn.disabled
+// at entry/exit) editorBuild had none at all, so a second click before the
+// first build's fetch resolved could fire a duplicate export/save.
+let _editorBuildInFlight = false;
+
 // Packages the current create session. The default is an explicit library export;
 // Save passes destination:"session" so the backend prepares a temporary package
 // for the user-selected file without publishing it.
 export async function editorBuild(options = {}) {
     if (!S.sessionId || !S.createMode) return false;
+    if (_editorBuildInFlight) return false;
+    const buildBtn = document.getElementById('editor-build-btn');
+    _editorBuildInFlight = true;
+    if (buildBtn) buildBtn.disabled = true;
+    try {
+        return await _editorBuildImpl(options);
+    } finally {
+        _editorBuildInFlight = false;
+        if (buildBtn) buildBtn.disabled = false;
+    }
+}
+
+async function _editorBuildImpl(options = {}) {
     const destination = options.destination === 'session' ? 'session' : 'library';
     // PR3c: warn before building when authored tone slots have no
     // matching gear definition — DLC Builder defaults them to stock

@@ -34,7 +34,7 @@ import {
 import { host } from './host.js';
 import { lanes } from './lanes.js';
 import { S } from './state.js';
-import { _editorPromptText, setStatus } from './ui.js';
+import { _editorPromptText, _installModalKeyboard, setStatus } from './ui.js';
 import { editorResolveAnchorWindow } from './anchor-resolve.js';
 
 // ─── Tone-lane slot data (PR3c) ────────────────────────────────────
@@ -583,6 +583,12 @@ export function onToneLaneContextMenu(e, x) {
 
 // ─── Modal handlers ─────────────────────────────────────────────────
 
+// This modal is static (screen.html), not rebuilt per open like the
+// dynamically-created ones _installModalKeyboard was originally written for
+// — so install its Escape/focus-trap handling once, lazily, on first show
+// rather than re-attaching a fresh keydown listener on every open.
+let _tonesKbInstalled = false;
+
 export function editorShowTonesModal() {
     const arr = _currentToneArr();
     if (!arr) return;
@@ -620,7 +626,12 @@ export function editorShowTonesModal() {
 
         container.appendChild(label);
     }
-    document.getElementById('editor-tones-modal').classList.remove('hidden');
+    const modal = document.getElementById('editor-tones-modal');
+    modal.classList.remove('hidden');
+    if (!_tonesKbInstalled) {
+        _tonesKbInstalled = true;
+        _installModalKeyboard(modal, modal.firstElementChild, editorHideTonesModal);
+    }
 }
 
 export function editorHideTonesModal() {

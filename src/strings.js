@@ -9,6 +9,7 @@ import { arrKind, _isBassArr } from './instrument.js';
 import { _stringCountFor, laneLabels } from './lanes.js';
 import { S, editGen } from './state.js';
 import { host } from './host.js';
+import { _installModalKeyboard } from './ui.js';
 
 
 /* @pure:string-tuning:start */
@@ -243,11 +244,22 @@ function _renderStringsModal() {
     }
 }
 
+// This modal is static (screen.html), not rebuilt per open like the
+// dynamically-created ones _installModalKeyboard was originally written for
+// — so install its Escape/focus-trap handling once, lazily, on first show
+// rather than re-attaching a fresh keydown listener on every open.
+let _stringsKbInstalled = false;
+
 export const editorShowStringsModal = () => {
     const arr = S.arrangements[S.currentArr];
     if (!arr) return;
     if (arrKind(arr) === 'keys' || arrKind(arr) === 'drums') return;
-    document.getElementById('editor-strings-modal').classList.remove('hidden');
+    const modal = document.getElementById('editor-strings-modal');
+    modal.classList.remove('hidden');
+    if (!_stringsKbInstalled) {
+        _stringsKbInstalled = true;
+        _installModalKeyboard(modal, modal.firstElementChild, editorHideStringsModal);
+    }
     _renderStringsModal();
 };
 

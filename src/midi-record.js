@@ -23,7 +23,7 @@ import { host } from './host.js';
 import { PIANO_LANE_H, _uniqueKeysName, isKeysMode, midiToY, noteToMidi, updatePianoRange } from './keys.js';
 import { S, markSessionDirty } from './state.js';
 import { _transportChartTimePure } from './transport.js';
-import { setStatus } from './ui.js';
+import { _installModalKeyboard, setStatus } from './ui.js';
 
 // ════════════════════════════════════════════════════════════════════
 // Record Keys arrangement live from a MIDI keyboard (Web MIDI API)
@@ -363,6 +363,15 @@ function _recCount() {
     if (_recCountEl) _recCountEl.textContent = _recNotes.length + ' notes';
 }
 
+// This modal is static (screen.html), not rebuilt per open like the
+// dynamically-created ones _installModalKeyboard was originally written for
+// — so install its Escape/focus-trap handling once, lazily, on first show
+// rather than re-attaching a fresh keydown listener on every open.
+// editorHideRecordMidiModal is passed as the close hook directly: it already
+// refuses to close while a take is active, so Escape mid-recording is
+// correctly a no-op rather than an emergency exit.
+let _recordMidiKbInstalled = false;
+
 export async function editorShowRecordMidiModal() {
     if (!S.sessionId) return;
     const modal = document.getElementById('editor-record-midi-modal');
@@ -411,6 +420,10 @@ export async function editorShowRecordMidiModal() {
     }
 
     modal.classList.remove('hidden');
+    if (!_recordMidiKbInstalled) {
+        _recordMidiKbInstalled = true;
+        _installModalKeyboard(modal, modal.firstElementChild, editorHideRecordMidiModal);
+    }
 }
 
 export function editorHideRecordMidiModal() {
