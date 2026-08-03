@@ -7082,9 +7082,12 @@ def setup(app, context):
                     next_step = "none"
                 else:
                     next_step = "save"
-            except Exception as e:
-                print(f"[Editor] replace-audio sloppak persist failed: {e}")
-                return JSONResponse({"error": f"persist failed: {e}"}, 500)
+            except Exception:
+                import logging as _elog
+                _elog.getLogger("slopsmith.plugin.editor").exception(
+                    "replace-audio: sloppak persist failed"
+                )
+                return JSONResponse({"error": "persist failed — see server logs"}, 500)
 
         return {"audio_url": audio_url, "persisted": persisted, "next_step": next_step}
 
