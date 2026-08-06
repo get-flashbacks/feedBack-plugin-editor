@@ -642,7 +642,7 @@ _STEM_AUDIO_EXTS = {".wav", ".ogg", ".opus", ".mp3", ".flac", ".m4a", ".aac"}
 # type from the app's own origin (stored XSS). `.wem` is accepted here too;
 # it's decoded server-side before anything reaches disk (see the `.wem`
 # branches below), never written through verbatim.
-_IMAGE_UPLOAD_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+_IMAGE_UPLOAD_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".dds"}
 _AUDIO_UPLOAD_EXTS = _STEM_AUDIO_EXTS | {".wem"}
 
 
