@@ -635,6 +635,15 @@ def _apply_tempo_marks(manifest: dict, marks) -> None:
         manifest.pop("editor_tempo_marks", None)
 _STEM_ID_SUB_RE = re.compile(r"[^a-zA-Z0-9_-]")
 _STEM_AUDIO_EXTS = {".wav", ".ogg", ".opus", ".mp3", ".flac", ".m4a", ".aac"}
+# Upload-endpoint extension allow-lists. Uploaded files land under STORAGE_DIR,
+# which is served back out same-origin (either the core app's public /static
+# mount or this plugin's own cache route) — an unrestricted extension lets a
+# crafted .svg/.html/.xhtml upload be served with a browser-executable content
+# type from the app's own origin (stored XSS). `.wem` is accepted here too;
+# it's decoded server-side before anything reaches disk (see the `.wem`
+# branches below), never written through verbatim.
+_IMAGE_UPLOAD_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+_AUDIO_UPLOAD_EXTS = _STEM_AUDIO_EXTS | {".wem"}
 
 
 def _stem_safe_id(name, taken):
@@ -6517,7 +6526,9 @@ def setup(app, context):
     @app.post("/api/plugins/editor/upload-art")
     async def upload_art(file: UploadFile = File(...)):
         art_id = Path(file.filename).stem.replace(" ", "_")
-        ext = Path(file.filename).suffix or ".png"
+        ext = (Path(file.filename).suffix or ".png").lower()
+        if ext not in _IMAGE_UPLOAD_EXTS:
+            return JSONResponse({"error": "unsupported image type"}, status_code=400)
         dest = STORAGE_DIR / f"editor_art_{art_id}{ext}"
         content = await file.read()
         dest.write_bytes(content)
@@ -6652,6 +6663,8 @@ def setup(app, context):
     async def upload_preview(file: UploadFile = File(...)):
         pid = re.sub(r"[^A-Za-z0-9_-]", "_", Path(file.filename or "").stem) or "preview"
         ext = (Path(file.filename or "").suffix or ".ogg").lower()
+        if ext not in _AUDIO_UPLOAD_EXTS:
+            return JSONResponse({"error": "unsupported audio type"}, status_code=400)
         content = await file.read()
         # A .wem preview would bake in unplayable — decode it (ogg > flac > mp3),
         # same as the audio uploads.
@@ -6674,6 +6687,8 @@ def setup(app, context):
     async def upload_audio(file: UploadFile = File(...)):
         audio_id = re.sub(r"[^A-Za-z0-9_-]", "_", Path(file.filename or "").stem) or "audio"
         ext = (Path(file.filename or "").suffix or ".mp3").lower()
+        if ext not in _AUDIO_UPLOAD_EXTS:
+            return JSONResponse({"error": "unsupported audio type"}, status_code=400)
         content = await file.read()
 
         # Wwise .wem can't be read by browsers or ffmpeg directly — decode it
