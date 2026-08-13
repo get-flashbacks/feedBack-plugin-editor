@@ -213,6 +213,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "Drum Pads" (distinct from the in-strip Kit/Pads toggle); the Mixer tooltip
   matches the Control Bar's wording; and the create-song year placeholder is current.
 
+- **The replace-audio persistence failure path no longer leaks exception
+  details or filesystem paths to the client.** The handler now logs the full
+  traceback server-side via `logging.getLogger("slopsmith.plugin.editor").exception(...)`
+  and returns a generic `"persist failed — see server logs"` response, matching
+  the codebase's existing structured-logging convention.
+
 ### Added
 
 - **Track regions — import a drum part into an existing project as a placed,
