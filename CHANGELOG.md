@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Fixed stored XSS via unrestricted file-upload extensions.** `upload-art`,
+  `upload-preview`, and `upload-audio` wrote uploaded bytes to disk using the
+  client-supplied filename's extension with no allow-list, and that storage
+  directory is served back same-origin — a file named e.g. `cover.svg` with an
+  embedded `<script>`/`onload` payload would execute in the app's origin when
+  served. Added extension allow-lists (mirroring the one `import-stems`
+  already used) and reject anything else with 400 before writing to disk.
+
 ### Added
 
 - **Save is now project persistence; Export to Library is publishing.** Importing
