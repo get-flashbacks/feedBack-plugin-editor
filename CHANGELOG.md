@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Added an XML entity-expansion ("billion laughs") guard.** `ET.parse()`
+  call sites that read XML from GP-conversion output / uploaded imports had
+  no defense against a crafted `<!ENTITY ...>` chain that could exhaust
+  memory/CPU on the request thread parsing it (classic XXE itself isn't
+  reachable — stdlib `expat` doesn't resolve external entities by default).
+  Added `_reject_entity_declarations`/`_safe_parse_xml_file` (same pattern
+  as `feedBack-plugin-musicxml-import`'s guard) and applied it at all three
+  `ET.parse()` call sites that read files from disk.
 - **Restricted `youtube-audio` to YouTube hostnames.** The route handed a
   caller-supplied URL straight to `yt_dlp`, which falls back to its generic
   extractor for anything it doesn't recognize — that extractor can fetch
