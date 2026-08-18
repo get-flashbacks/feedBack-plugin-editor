@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Restricted `youtube-audio` to YouTube hostnames.** The route handed a
+  caller-supplied URL straight to `yt_dlp`, which falls back to its generic
+  extractor for anything it doesn't recognize — that extractor can fetch
+  essentially any web page server-side, an SSRF shape with no scheme/host
+  restriction. The UI only ever offers "paste a YouTube URL"; the route now
+  rejects any URL whose scheme isn't http/https or whose host isn't
+  youtube.com/youtu.be (or a documented subdomain) with 400, before yt_dlp
+  ever sees it.
 - **Fixed stored XSS via unrestricted file-upload extensions.** `upload-art`,
   `upload-preview`, and `upload-audio` wrote uploaded bytes to disk using the
   client-supplied filename's extension with no allow-list, and that storage
