@@ -12,6 +12,7 @@ import tempfile
 import time
 import zipfile
 from pathlib import Path
+from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 from xml.dom import minidom
 
@@ -1041,6 +1042,28 @@ def _safe_wafont_name(name):
     if not isinstance(name, str):
         return None
     return name if _WAFONT_NAME_RE.match(name) else None
+
+
+# Hosts the /youtube-audio route is allowed to hand to yt_dlp. Whitelist
+# shape, not a blacklist — see the comment on the route itself (setup()) for
+# why: yt_dlp's generic extractor can fetch essentially any web page, which
+# makes an unrestricted URL an SSRF vector.
+_YOUTUBE_HOSTS = frozenset({
+    "youtube.com", "www.youtube.com", "m.youtube.com",
+    "music.youtube.com", "youtu.be", "www.youtu.be",
+})
+
+
+def _is_youtube_url(url):
+    """True only for an http(s) youtube.com/youtu.be URL. Pure string
+    validation — no network access, no DNS resolution."""
+    if not isinstance(url, str):
+        return False
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    return parsed.scheme in ("http", "https") and (parsed.hostname or "").lower() in _YOUTUBE_HOSTS
 
 
 def _gp_sync_points_to_warp_payload(sync_points):
@@ -6714,12 +6737,25 @@ def setup(app, context):
         return {"audio_url": f"{STORAGE_URL}/editor_audio_{audio_id}{ext}", "duration": _dur}
 
     # ── Download audio from YouTube ──────────────────────────────────
+    #
+    # This hands a caller-supplied URL to yt_dlp, which by default falls
+    # back to its *generic* extractor for anything it doesn't recognize —
+    # that extractor can fetch essentially any web page server-side, which
+    # is an SSRF shape (server-side fetch of a caller-chosen target with no
+    # scheme/host restriction). The UI only ever offers "paste a YouTube
+    # URL" (screen.html), so restricting to YouTube's own hostnames (see
+    # _is_youtube_url) closes that off at the one point we control, without
+    # needing to intercept yt_dlp's internal request handling (which also
+    # legitimately talks to Google's video CDN hosts, not just the URL the
+    # caller supplied).
 
     @app.post("/api/plugins/editor/youtube-audio")
     async def youtube_audio(data: dict):
         url = data.get("url", "").strip()
         if not url:
             return JSONResponse({"error": "No URL provided"}, 400)
+        if not _is_youtube_url(url):
+            return JSONResponse({"error": "URL must be a youtube.com or youtu.be link"}, 400)
 
         def _download():
             tmp = tempfile.mkdtemp(prefix="slopsmith_yt_")
