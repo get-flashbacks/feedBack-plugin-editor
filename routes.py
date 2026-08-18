@@ -1,6 +1,7 @@
 """Arrangement Editor plugin — backend routes."""
 
 import asyncio
+import io
 import json
 import logging
 import math
@@ -62,10 +63,15 @@ def _reject_entity_declarations(xml_bytes):
 
 
 def _safe_parse_xml_file(path):
-    """`ET.parse(path)` with the entity-expansion guard applied first."""
+    """`ET.parse(path)` with the entity-expansion guard applied first.
+
+    Parses the SAME bytes the guard checked (via io.BytesIO) rather than
+    reopening `path` — reopening would let a file swapped in between the
+    read_bytes() check and the reparse bypass the guard entirely (TOCTOU).
+    """
     xml_bytes = Path(path).read_bytes()
     _reject_entity_declarations(xml_bytes)
-    return ET.parse(path)
+    return ET.parse(io.BytesIO(xml_bytes))  # noqa: S314 — entity declarations already rejected above
 
 
 def _filename_bpm(text):
@@ -7461,6 +7467,10 @@ def setup(app, context):
         ``audio_url`` tell the caller which files the project references.
         """
         raw = await file.read()
+        try:
+            _reject_entity_declarations(raw)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, 400)
         gpa = _load_goplayalong()
         if not gpa.is_goplayalong_xml(raw):
             return JSONResponse(
@@ -8208,25 +8218,30 @@ def setup(app, context):
             #   * a positive <offset> with <startBeat> 0                → shift = offset
             # Summing them, shift = offset + startBeat, is correct for both
             # without inspecting which kind of file it is.
-            start_beat = 0.0
-            for _xf in sorted(Path(tmp).glob("*.xml")):
-                try:
-                    _root = _safe_parse_xml_file(_xf).getroot()
-                except Exception:
-                    continue
-                if _root.tag != "song":
-                    continue
-                _arr = _root.find("arrangement")
-                if _arr is None or not _arr.text or _arr.text.strip().lower() in (
-                        "vocals", "showlights", "jvocals"):
-                    continue
-                _sb = _root.find("startBeat")
-                if _sb is not None and _sb.text:
+            def _find_start_beat():
+                # Blocking file I/O + XML parsing — run off the event loop,
+                # same as the _load() call above.
+                for _xf in sorted(Path(tmp).glob("*.xml")):
                     try:
-                        start_beat = float(_sb.text)
-                    except ValueError:
-                        start_beat = 0.0
-                break
+                        _root = _safe_parse_xml_file(_xf).getroot()
+                    except Exception:
+                        continue
+                    if _root.tag != "song":
+                        continue
+                    _arr = _root.find("arrangement")
+                    if _arr is None or not _arr.text or _arr.text.strip().lower() in (
+                            "vocals", "showlights", "jvocals"):
+                        continue
+                    _sb = _root.find("startBeat")
+                    if _sb is not None and _sb.text:
+                        try:
+                            return float(_sb.text)
+                        except ValueError:
+                            return 0.0
+                    return 0.0
+                return 0.0
+
+            start_beat = await asyncio.get_event_loop().run_in_executor(None, _find_start_beat)
             shift = song.offset + start_beat
             if shift:
                 _apply_chart_offset(song, shift)

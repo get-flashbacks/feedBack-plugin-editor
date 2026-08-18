@@ -7,8 +7,12 @@ regardless of the byte encoding used to smuggle them past a naive ASCII scan
 transparently) while never rejecting a legitimate arrangement XML file.
 """
 
+import io
+from unittest.mock import patch
+
 import pytest
 
+import routes
 from routes import _ENTITY_DECL_RE, _reject_entity_declarations, _safe_parse_xml_file
 
 
@@ -64,3 +68,48 @@ def test_safe_parse_xml_file_parses_a_legitimate_file(tmp_path):
     root = _safe_parse_xml_file(good_path).getroot()
     assert root.tag == "song"
     assert root.find("arrangement").text == "Lead"
+
+
+def test_safe_parse_xml_file_parses_the_validated_bytes_not_a_reopened_path(tmp_path):
+    # TOCTOU regression guard: parsing must use the exact bytes already
+    # read and validated (via io.BytesIO), never reopen `path` a second
+    # time -- reopening would let a file swapped in between the two steps
+    # bypass the guard entirely.
+    good_path = tmp_path / "song.xml"
+    good_path.write_bytes(_LEGIT_DOC.encode('utf-8'))
+    real_parse = routes.ET.parse
+    calls = []
+
+    def _spy_parse(source, *args, **kwargs):
+        calls.append(source)
+        return real_parse(source, *args, **kwargs)
+
+    with patch.object(routes.ET, "parse", side_effect=_spy_parse):
+        _safe_parse_xml_file(good_path)
+
+    assert len(calls) == 1
+    assert isinstance(calls[0], io.BytesIO), (
+        "ET.parse must be called with the already-validated bytes, not the path"
+    )
+
+
+# The GoPlayAlong sync-upload route (parse-goplayalong-sync) hands raw
+# user-uploaded bytes straight to goplayalong.py's ET.fromstring() calls,
+# whose defusedxml preference silently falls back to the vulnerable stdlib
+# parser when defusedxml isn't installed (it isn't, here) -- the most
+# directly user-controlled XML surface in this plugin. The route now calls
+# _reject_entity_declarations(raw) before either goplayalong call; this
+# documents that a <track>-shaped entity bomb is caught by the exact same
+# guard function that route wires in.
+_GOPLAYALONG_ENTITY_BOMB = '''<?xml version="1.0"?>
+<!DOCTYPE track [
+  <!ENTITY a "1234567890">
+  <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">
+]>
+<track id="1" title="&b;"></track>
+'''
+
+
+def test_goplayalong_shaped_entity_bomb_is_rejected():
+    with pytest.raises(ValueError, match='entity'):
+        _reject_entity_declarations(_GOPLAYALONG_ENTITY_BOMB.encode('utf-8'))
