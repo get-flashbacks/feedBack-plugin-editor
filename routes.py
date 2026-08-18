@@ -1,6 +1,7 @@
 """Arrangement Editor plugin — backend routes."""
 
 import asyncio
+import io
 import json
 import logging
 import math
@@ -15,6 +16,62 @@ from pathlib import Path
 from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 from xml.dom import minidom
+
+
+# ── XML entity-expansion ("billion laughs") DoS guard ───────────────────
+#
+# stdlib expat doesn't resolve external entities by default, so classic XXE
+# isn't reachable here, but a crafted <!ENTITY ...> chain (billion-laughs /
+# quadratic blowup) can still exhaust memory/CPU on the request thread that
+# parses it. Every ET.parse() call site in this file reads XML from files
+# this plugin didn't author itself (GP-conversion output, an uploaded
+# loose-folder import, or similar) — same threat and same fix as
+# feedBack-plugin-musicxml-import's _reject_entity_declarations guard.
+#
+# Real GP/RS arrangement XML never declares a custom entity, so rejecting
+# any file containing "<!ENTITY " blocks the attack while leaving every
+# legitimate file untouched. expat autodetects encoding (BOM / XML
+# declaration) and accepts UTF-16/UTF-32, not just UTF-8/ASCII, where a raw
+# ASCII byte scan would miss the interleaved-null-byte form of the same
+# token — so the guard also re-decodes under each such encoding and checks
+# the decoded text.
+_ENTITY_DECL_RE = re.compile(rb'<!ENTITY\s', re.IGNORECASE)
+_ENTITY_DECL_TEXT_RE = re.compile(r'<!ENTITY\s', re.IGNORECASE)
+_ENTITY_GUARD_ENCODINGS = (
+    'utf-16', 'utf-16-le', 'utf-16-be',
+    'utf-32', 'utf-32-le', 'utf-32-be',
+)
+
+
+def _reject_entity_declarations(xml_bytes):
+    """Raise ValueError if `xml_bytes` declares a custom XML entity."""
+    if _ENTITY_DECL_RE.search(xml_bytes):
+        raise ValueError(
+            'XML file declares a custom entity, which is not permitted '
+            '(entity-expansion / "billion laughs" protection).'
+        )
+    for encoding in _ENTITY_GUARD_ENCODINGS:
+        try:
+            text = xml_bytes.decode(encoding)
+        except (UnicodeDecodeError, LookupError):
+            continue
+        if _ENTITY_DECL_TEXT_RE.search(text):
+            raise ValueError(
+                'XML file declares a custom entity, which is not permitted '
+                '(entity-expansion / "billion laughs" protection).'
+            )
+
+
+def _safe_parse_xml_file(path):
+    """`ET.parse(path)` with the entity-expansion guard applied first.
+
+    Parses the SAME bytes the guard checked (via io.BytesIO) rather than
+    reopening `path` — reopening would let a file swapped in between the
+    read_bytes() check and the reparse bypass the guard entirely (TOCTOU).
+    """
+    xml_bytes = Path(path).read_bytes()
+    _reject_entity_declarations(xml_bytes)
+    return ET.parse(io.BytesIO(xml_bytes))  # noqa: S314 — entity declarations already rejected above
 
 
 def _filename_bpm(text):
@@ -99,8 +156,8 @@ def _pick_timeline_xml_root(xml_paths):
     first_root = None
     for p in xml_paths or []:
         try:
-            root = XET.parse(p).getroot()
-        except (XET.ParseError, OSError):
+            root = _safe_parse_xml_file(p).getroot()
+        except (XET.ParseError, OSError, ValueError):
             continue
         if first_root is None:
             first_root = root
@@ -2332,7 +2389,7 @@ def _arrangement_xml_candidates(tmp_dir):
     candidates = []
     for xf in Path(tmp_dir).rglob("*.xml"):
         try:
-            root = ET.parse(xf).getroot()
+            root = _safe_parse_xml_file(xf).getroot()
         except Exception:
             continue
         if root.tag != "song":
@@ -4061,6 +4118,10 @@ def _build_arrangement_xml(
             attrs["arpeggio"] = "1"
         ET.SubElement(hs_el, "handShape", **attrs)
 
+    # No entity-expansion guard needed here: xml_str is this function's own
+    # ET.tostring() output, not file/user input, and the serializer escapes
+    # `<` in every text/attribute value, so an "<!ENTITY " construct can
+    # never appear literally in it regardless of what any value contains.
     xml_str = ET.tostring(root, encoding="unicode")
     dom = minidom.parseString(xml_str)
     return dom.toprettyxml(indent="  ", encoding=None)
@@ -7406,6 +7467,10 @@ def setup(app, context):
         ``audio_url`` tell the caller which files the project references.
         """
         raw = await file.read()
+        try:
+            _reject_entity_declarations(raw)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, 400)
         gpa = _load_goplayalong()
         if not gpa.is_goplayalong_xml(raw):
             return JSONResponse(
@@ -8153,25 +8218,30 @@ def setup(app, context):
             #   * a positive <offset> with <startBeat> 0                → shift = offset
             # Summing them, shift = offset + startBeat, is correct for both
             # without inspecting which kind of file it is.
-            start_beat = 0.0
-            for _xf in sorted(Path(tmp).glob("*.xml")):
-                try:
-                    _root = ET.parse(_xf).getroot()
-                except Exception:
-                    continue
-                if _root.tag != "song":
-                    continue
-                _arr = _root.find("arrangement")
-                if _arr is None or not _arr.text or _arr.text.strip().lower() in (
-                        "vocals", "showlights", "jvocals"):
-                    continue
-                _sb = _root.find("startBeat")
-                if _sb is not None and _sb.text:
+            def _find_start_beat():
+                # Blocking file I/O + XML parsing — run off the event loop,
+                # same as the _load() call above.
+                for _xf in sorted(Path(tmp).glob("*.xml")):
                     try:
-                        start_beat = float(_sb.text)
-                    except ValueError:
-                        start_beat = 0.0
-                break
+                        _root = _safe_parse_xml_file(_xf).getroot()
+                    except Exception:
+                        continue
+                    if _root.tag != "song":
+                        continue
+                    _arr = _root.find("arrangement")
+                    if _arr is None or not _arr.text or _arr.text.strip().lower() in (
+                            "vocals", "showlights", "jvocals"):
+                        continue
+                    _sb = _root.find("startBeat")
+                    if _sb is not None and _sb.text:
+                        try:
+                            return float(_sb.text)
+                        except ValueError:
+                            return 0.0
+                    return 0.0
+                return 0.0
+
+            start_beat = await asyncio.get_event_loop().run_in_executor(None, _find_start_beat)
             shift = song.offset + start_beat
             if shift:
                 _apply_chart_offset(song, shift)
