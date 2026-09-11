@@ -42,6 +42,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`editor_cache/` is now included in Settings backups.** Uploaded audio,
+  art, previews, and stem-session files for an in-progress (not yet
+  saved/exported) editing session live under `editor_cache/`
+  (`context["config_dir"]`), which had no `settings.server_files` entry —
+  so a Settings export/import silently dropped any unsaved work-in-progress
+  session state. Declared `editor_cache/` in `plugin.json`; the shared,
+  regenerable `sloppak_cache/` (core's `get_sloppak_cache_dir()`, not
+  plugin-private) is intentionally left undeclared.
 - **Save is now project persistence; Export to Library is publishing.** Importing
   files creates only an unsaved editing session. A new project's first Save
   chooses a `.feedpak` name and location through the native picker, later saves
