@@ -86,7 +86,9 @@ const RIGID_TOL = 1e-9;      // seconds the pivot may move (it must not)
 const ONSET_TOL = 0.015;     // fixture integrity: a click may sit off its beat
 // The shipped model's limit on an already-synced, TEMPO-varying song, measured
 // below and pinned so a later change to getTabBPM or the onset vote cannot
-// quietly move the baseline the per-section sub-issues compare against.
+// quietly move the baseline the per-section sub-issues compare against. Unlike
+// the tolerances above this pin is expected to MOVE once per-section sync lands
+// (#24) — see the baseline test at the foot of the file.
 const BASE_TAB_BPM = 112.9412;    // 60 / mean beat interval over 12 bars @128 + 8 @96
 const BASE_FACTOR = 1.1333;       // the per-beat majority vote (128) over that
 
@@ -380,6 +382,13 @@ t('baseline: a song that also changes TEMPO is what per-section sync has to beat
     // number the per-section sub-issues must improve on — pinned here so a future
     // change to getTabBPM or to the vote cannot quietly move the baseline they
     // compare against.
+    //
+    // This is a CHARACTERIZATION, not a regression guard: it pins what the uniform
+    // model gets WRONG, so it is expected to go red the moment that stops being
+    // true. #24 (per-section alignment) is the issue that measures its per-section
+    // factors against this global number, so it owns updating or deleting this
+    // pin when it lands; #25 bakes the result. A failure here is not a regression
+    // in the do-no-harm guarantee — the tests above are what guard that.
     const beatTempo = buildGrid(TEMPO_CHANGE);
     seedChart(beatTempo);
     const barBpm = new Set(_tempoMarkersPure(beatTempo, 0.01, [])
