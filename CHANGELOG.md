@@ -42,29 +42,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Regression guard for the uniform sync on a meter-changing song.** The Sync
-  Tempo dialog applies ONE BPM factor across the whole chart, so its safety
-  property for a song whose meter changes mid-song (the "Money" shape — a
-  compound verse giving way to a square solo) is that it does no harm: factor ~ 1
-  and offset ~ 0, not a damaging global correction. Nothing pinned that, so a
-  change to the onset detector could have started smearing every section of such
-  a song on the strength of one section's tempo. Added
-  `tests/sync_meter_change_do_no_harm.test.mjs`, which runs the shipped Sync
-  Tempo path (`editorSyncTempo` → `editorApplySync`) over a synthetic click
-  track of an already-synced chart whose bar length switches from 7 beats to 4
-  mid-song, and asserts — on both onset paths, the synchronous RMS strip the
-  dialog reads on load and the banded spectral flux it settles on — that the
-  factor stays within 1% of 1, that bar 1 (the pivot) does not move at all, that
-  no authored time moves by more than 0.6 s, that no offset is invented, and
-  that the result is one clean undo/redo step. 1% is the banded detector's own
-  measurement noise here (its sub-hop click placement runs ~5 ms off a 469 ms
-  interval); a real global correction misses it by an order of magnitude, and a
-  deliberate half-tempo correction through the same path is shown to blow the
-  budget. The fixture, and all four tolerances, are documented in the file for
-  the per-section sync work to reuse, alongside a pinned characterization of the
-  case the uniform model cannot help: a song that also changes *tempo*, where
-  `getTabBPM()`'s mean beat interval (112.94) and the onset vote's per-beat
-  majority (128) disagree and the global factor lands 13.3% off.
 - **`editor_cache/` is now included in Settings backups.** Uploaded audio,
   art, previews, and stem-session files for an in-progress (not yet
   saved/exported) editing session live under `editor_cache/`
