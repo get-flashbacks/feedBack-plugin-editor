@@ -3811,10 +3811,16 @@ def _authored_phrase_levels(tiers, pn, pc, pa, *, levels=(),
     note/chord/anchor lists are that tier — core builds a phrase's flat
     contribution from its top authored level (`lib.song.parse_arrangement`),
     and it's also the only copy the editor's UI can edit — so it's re-sliced
-    from them here and a chart edit reaches every difficulty. The LOWER tiers
-    are the authored simplifications, written verbatim, which is what finally
-    lets the highway's mastery filter (`phrases[].levels[idx].notes`) show
-    something other than one chart repeated N times.
+    from them here. The LOWER tiers are the authored simplifications, written
+    verbatim, which is what finally lets the highway's mastery filter
+    (`phrases[].levels[idx].notes`) show something other than one chart repeated
+    N times.
+
+    Consequence worth knowing: a chart edit reaches the TOP tier only. An
+    authored lower tier keeps its own content until it is itself edited (there
+    is no tier-authoring UI yet), which is the point of an authored
+    simplification — but it does mean a note deleted from the chart stays
+    visible at lower mastery until that tier is updated.
 
     Levels come out sorted by difficulty, matching core's own emission.
 
