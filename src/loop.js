@@ -39,6 +39,11 @@ export function _editorViewportDuration() {
 }
 
 export function _editorClampScrollX(scrollX) {
+    // Deliberately GLOBAL-only: the scroll bound exists so a positive global
+    // shift can't push the recording's tail out of reach, and it has always
+    // ignored the per-source offset. A per-track offset past the chart end is
+    // not covered — folding the term in would mean a max-over-all-tracks walk on
+    // every scroll clamp; that is a follow-up, not a silent omission.
     let duration = _audioTimelineDurationPure(S.duration, S.audioShift, S.audioBuffer && S.audioBuffer.duration);
     // Compose/MIDI-only sessions have no audio to bound the timeline, and
     // S.duration is only derived from the grid inside startPlayback() — so

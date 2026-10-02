@@ -20,7 +20,8 @@
 // Browser surface: WebAudio (AudioContext), `canvas` (for waveform width),
 // ════════════════════════════════════════════════════════════════════
 import { timeOf } from './beats.js';
-import { _trackRegionsResolvePure } from './region.js';
+import { _placementSecPure, _trackPlacementPure, _trackRegionsResolvePure } from './region.js';
+import { TrackOffsetCmd, trackOffsetTarget } from './region-commands.js';
 import { DPR, canvas } from './canvas.js';
 import { LABEL_W, timeToX } from './geometry.js';
 import {
@@ -323,16 +324,23 @@ function _cancelOnsetJob() {
     if (_onsetJob) { _onsetJob.cancelled = true; _onsetJob = null; }
 }
 
-// Onsets in CHART/timeline time — buffer-time onsets plus the audio placement
-// shift — for everything that relates a detected attack to a musical position
-// (Suggest-fit, onset snap, Sync phase). Returns the raw cached array UNCHANGED
-// when there is no shift (the common case → zero allocation on hot paths); only
-// maps when the recording has been slid. The buffer-time `_ensureOnsets()` cache
-// stays the source of truth (memoized on the peaks); the shift is applied on read
-// so it always tracks the live S.audioShift.
+// Onsets in CHART/timeline time — buffer-time onsets plus the ACTIVE source's
+// composed placement (global audioShift + its own source offset + its track's
+// per-track offset) — for everything that relates a detected attack to a musical
+// position (Suggest-fit, onset snap, Sync phase, Map Health). Returns the raw
+// cached array UNCHANGED when there is no shift (the common case → zero
+// allocation on hot paths); only maps when the recording has been slid. The
+// buffer-time `_ensureOnsets()` cache stays the source of truth (memoized on the
+// peaks); the shift is applied on read so it always tracks live placement —
+// leaving the per-track term out would read a nudged track as a whole-map drift
+// equal to its offset. (That is the alignment reading of a track offset: it
+// corrects where the track sits against the chart, so the chart-time onsets move
+// with it. A deliberately misaligned track — an intentional layer against the
+// beat — will therefore read as healthy here, which is correct: the lens judges
+// chart-vs-recording, not intent.)
 export function _ensureOnsetsShifted() {
     const raw = _ensureOnsets();
-    const sh = (Number(S.audioShift) || 0) + (Number(S.activeAudioSourceOffset) || 0);
+    const sh = activeSourcePlacementSec();
     if (!raw || !sh) return raw;
     return raw.map(o => ({ ...o, t: o.t + sh }));   // carry s + per-band strengths
 }
@@ -416,7 +424,9 @@ async function _computeGuideOnsets(sourceId, url) {
 // _ensureOnsetsShifted).
 export async function ensureGuideOnsetsShifted(sourceId, url, sourceOffset = 0) {
     const raw = await ensureGuideOnsets(sourceId, url);
-    const sh = (Number(S.audioShift) || 0) + (Number(sourceOffset) || 0);
+    // The guide stem is placed like any other audio track: global shift + its own
+    // source offset + its own per-track offset.
+    const sh = _trackPlacementPure(S.audioShift, sourceOffset, _trackOffsetForSourceId(sourceId));
     if (!raw || !sh) return raw;
     return raw.map(o => ({ ...o, t: o.t + sh }));
 }
@@ -480,11 +490,17 @@ export function _editorToggleSnapMode() {
 /* @pure:audio-shift:start */
 // Where to start the buffer given the playhead chart-time, the audio placement
 // shift, and the buffer length. The audio plays buffer-time (cursorTime -
-// audioShift): a positive shift slides the recording LATER, so the chart runs
+// placementSec): a positive shift slides the recording LATER, so the chart runs
 // ahead of the audio and the source start is delayed; a negative shift skips
 // into the buffer. Returns { play, offset, delay } — `play:false` when the
 // (shifted) audio has already ended at this chart position, so no source is
 // created and only the transport clock runs.
+//
+// `audioShift` is kept as the parameter name for history, but callers pass the
+// SOURCE'S FULL COMPOSED PLACEMENT (global shift + source offset + that source's
+// per-track offset — `activeSourcePlacementSec()`), which is the same additive
+// term this function has always consumed. Per-region callers use
+// `_regionStartPure` below, which takes the composition explicitly.
 export function _audioBufferStartPure(cursorTime, audioShift, bufferDuration) {
     const bufOff = (Number(cursorTime) || 0) - (Number(audioShift) || 0);
     const dur = Number(bufferDuration) || 0;
@@ -690,7 +706,7 @@ function _startRefMediaAt(st, preRoll = 0) {
 function _auditionResyncMedia() {
     if (!_auditionActive() || !_refMediaEl || _refMediaEl.paused) return;
     const st = _audioBufferStartPure(S.cursorTime,
-        (Number(S.audioShift) || 0) + (Number(S.activeAudioSourceOffset) || 0),
+        activeSourcePlacementSec(),
         S.audioBuffer && S.audioBuffer.duration);
     if (!st.play) return;
     if (Math.abs(_refMediaEl.currentTime - st.offset) > 0.03) {
@@ -762,15 +778,17 @@ function _audioSourceGroup(nodes) {
 }
 
 export function _startAudioSourceAtCursor(preRoll = 0) {
-    // Slide the recording by S.audioShift (the chart clock, anchored below, is
-    // untouched — only the buffer read position moves). A positive shift can
-    // push the audio start into the future (delay) or, near the end, past the
-    // buffer entirely (no source; the transport still runs so the cursor and
-    // guide advance over the trailing silence).
+    // Slide the recording by its composed placement — the global audioShift plus
+    // the active source's own offset plus THAT SOURCE'S per-track offset (the
+    // chart clock, anchored below, is untouched; only the buffer read position
+    // moves). A positive shift can push the audio start into the future (delay)
+    // or, near the end, past the buffer entirely (no source; the transport still
+    // runs so the cursor and guide advance over the trailing silence).
     const duration = S.audioBuffer && S.audioBuffer.duration;
-    const activeShift = (Number(S.audioShift) || 0) + (Number(S.activeAudioSourceOffset) || 0);
+    const activeTrack = _audioTrackForSourceId(S.activeAudioSourceId);
+    const activeShift = activeSourcePlacementSec();
     const placements = _audioRegionPlacementsPure(
-        _trackRegionsForSourceId(S.activeAudioSourceId), duration,
+        activeTrack ? activeTrack.regions : null, duration,
         (b) => timeOf(S.beats, b));
     const starts = placements
         .filter(region => !region.muted)
@@ -888,6 +906,42 @@ export function editorSetAudioShift(val) {
 }
 export function editorNudgeAudioShift(delta) {
     editorSetAudioShift((Number(S.audioShift) || 0) + (Number(delta) || 0));
+}
+
+// Verb: set ONE track's placement offset (seconds, 1 ms resolution), undoably
+// and independently of the global shift. The track's placement is the sum of
+// audioShift + the source's own offset + this offset (src/region.js), so moving
+// one track leaves every other track — and the global shift — exactly where they
+// were. TrackOffsetCmd is the container-only command; the audio reaction
+// (re-seat a live source, redraw the shifted lane) rides `afterApply` so it also
+// fires on UNDO and REDO, which reach the command without passing through here.
+export function editorSetTrackOffset(trackId, val) {
+    const track = trackOffsetTarget(trackId);
+    if (!track) return false;
+    // A value that isn't a number is a REFUSAL, never a silent zero: `parseFloat
+    // (x) || 0` would turn garbage (or a JSON `true`, or a 1e308 that overflows
+    // the millisecond round) into 0 and DELETE the track's real offset while
+    // reporting a move. The backend rejects the same shapes in
+    // `_coerce_track_offset`; this is the client half of that boundary.
+    const n = typeof val === 'number' ? val : parseFloat(val);
+    if (!Number.isFinite(n)) return false;
+    const next = Math.round(n * 1000) / 1000;
+    if (!Number.isFinite(next)) return false;
+    const cur = _placementSecPure(track.offsetSec);
+    if (Math.abs(next - cur) < 1e-4) return false;
+    const cmd = new TrackOffsetCmd({ trackId, oldSec: cur, newSec: next });
+    cmd.afterApply = _afterAudioShiftChange;
+    S.history.exec(cmd);
+    const ms = Math.round(next * 1000);
+    setStatus(`Track offset ${ms >= 0 ? '+' : ''}${ms}ms — ${track.name || 'this track'} moved; every other track and the global shift unchanged.`);
+    return true;
+}
+export function editorNudgeTrackOffset(trackId, delta) {
+    const track = trackOffsetTarget(trackId);
+    if (!track) return false;
+    const d = typeof delta === 'number' ? delta : parseFloat(delta);
+    if (!Number.isFinite(d)) return false;
+    return editorSetTrackOffset(trackId, _placementSecPure(track.offsetSec) + d);
 }
 
 // Anchor the transport clock at the current cursor: pin wall-time to the
@@ -2024,14 +2078,29 @@ function _liveAudioSources() {
         S.trackSession && S.trackSession.removedSourceIds);
 }
 
-// The regions[] of the audio track that owns a source (matched by sourceId), or
-// null → the implicit default full-span region. Lets the scheduler place one
-// buffer source per region instead of one per stem.
-function _trackRegionsForSourceId(sourceId) {
+// The audio track row that owns a source (matched by sourceId), or null. Both
+// the scheduler's per-region placements and the track's own placement offset
+// come off this one row; null → the implicit default full-span region and a
+// zero offset, i.e. exactly the pre-offset behaviour.
+function _audioTrackForSourceId(sourceId) {
     const tracks = S.trackSession && Array.isArray(S.trackSession.tracks) ? S.trackSession.tracks : null;
     if (!tracks) return null;
-    const track = tracks.find(t => t && t.type === 'audio' && t.sourceId === sourceId);
-    return track ? track.regions : null;
+    return tracks.find(t => t && t.type === 'audio' && t.sourceId === sourceId) || null;
+}
+
+// That row's placement offset — the per-track term of the composed placement
+// (src/region.js "Track placement").
+function _trackOffsetForSourceId(sourceId) {
+    const track = _audioTrackForSourceId(sourceId);
+    return track ? _placementSecPure(track.offsetSec) : 0;
+}
+
+// The ACTIVE source's composed placement, in chart seconds: the global
+// audioShift, that source's own offset and its track's own offset, summed. The
+// scheduler and the render surfaces (src/waveform.js) both read it, so the
+// waveform can't be drawn somewhere the sound isn't.
+export function activeSourcePlacementSec() {
+    return _trackPlacementPure(S.audioShift, S.activeAudioSourceOffset, _trackOffsetForSourceId(S.activeAudioSourceId));
 }
 
 // The sources the multi-source scheduler plays: every live source EXCEPT the
@@ -2293,25 +2362,29 @@ export function applyStemMix(immediate = false) {
 // as one buffer source PER REGION: a project with no authored regions has one
 // full-span region, so this is byte-identical to the old whole-stem path; a
 // moved/trimmed region plays its media window [srcIn,srcOut) starting at the
-// group shift + timeOf(startBeat). Called from the reference's rate-1 start path
-// (never audition-slow, which is single-stream — see the design's phase-1 note).
+// group's composed placement + timeOf(startBeat) — the global audioShift, this
+// source's own offset and this track's own offset, summed per source. Called
+// from the reference's rate-1 start path (never audition-slow, which is
+// single-stream — see the design's phase-1 note).
 function _startStemSources(preRoll = 0, cursorTime = S.cursorTime) {
     _stopStemSources();
     if (!S.audioCtx) return 0;
     let started = 0;
-    const baseShift = Number(S.audioShift) || 0;
     const ctxNow = S.audioCtx.currentTime;
     for (const source of _liveAudioSources()) {
         if (source.id === S.activeAudioSourceId) continue;   // plays via S.audioSource
         const cached = stemAudioCache.get(source.id);
         if (!cached || !cached.buffer) continue;   // not decoded yet — syncStemAudio catches up
         const dest = _ensureStemGain(source.id) || _ensureRefGain() || S.audioCtx.destination;
+        const track = _audioTrackForSourceId(source.id);
+        const sourceShift = _trackPlacementPure(S.audioShift, source.offset,
+            track && _placementSecPure(track.offsetSec));
         const nodes = [];
         for (const region of _audioRegionPlacementsPure(
-                _trackRegionsForSourceId(source.id), cached.buffer.duration,
+                track ? track.regions : null, cached.buffer.duration,
                 (b) => timeOf(S.beats, b))) {
             if (region.muted) continue;
-            const startTime = baseShift + source.offset + region.startBeatTime;
+            const startTime = sourceShift + region.startBeatTime;
             const p = _regionStartPure(cursorTime, startTime, region.srcIn, region.srcOut);
             if (!p.play) continue;
             const node = S.audioCtx.createBufferSource();

@@ -22,7 +22,7 @@
 // ════════════════════════════════════════════════════════════════════
 import { beatOf, timeOf } from './beats.js';
 import {
-    DEFAULT_REGION_ID, _nextRegionIdPure, _regionContainsBeatPure, _regionRemapPure,
+    DEFAULT_REGION_ID, _nextRegionIdPure, _placementSecPure, _regionContainsBeatPure, _regionRemapPure,
     _trackRegionsNormalizePure, _trackRegionsResolvePure,
 } from './region.js';
 import { S } from './state.js';
@@ -438,5 +438,80 @@ export class TrimRegionCmd {
 
     rollback() {
         _restoreRegions(_findTrack(this.trackId), this._regionBefore);
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// TrackOffsetCmd — nudge ONE track in time, independently of the song.
+//
+// The data-model half of the per-track offset (see src/region.js "Track
+// placement"). Container-only, exactly like TrimRegionCmd: it writes
+// `offsetSec` on the track row and touches no notes, no hits and no samples, so
+// the edit is a placement — non-destructive, and undoable by putting one field
+// back. That also means no editGen/content churn, and that the value composes
+// with (never replaces) the global audioShift and the source's own offset.
+//
+// The row an offset may be written to, or null. Only an AUDIO track carries
+// one: a folder has no timeline of its own, and a transcription track's
+// placement is expressed by its regions (moved by MoveRegionCmd). Returning
+// null for the rest means the command refuses rather than quietly writing a
+// field that no placement site would read — the same gate normalize applies
+// when a persisted value is loaded back.
+export function trackOffsetTarget(trackId) {
+    const track = _findTrack(trackId);
+    return track && track.type === 'audio' ? track : null;
+}
+
+// Rollback restores the row's raw `offsetSec` verbatim, including deleting a
+// key that was never there, so a track slid back to 0 leaves no residue in the
+// pack. The audio reaction (re-seat a live source, redraw the lane) is NOT
+// called directly: this module stays DOM-free (tests/commands_dom_free.test.mjs
+// is the boundary), so the caller hands us an `afterApply` callback and we invoke
+// it after every write. It must fire on rollback too, not just exec — undo and
+// redo reach this command WITHOUT passing through the calling verb, so a
+// reaction that lived only in the verb would leave playing audio at the old
+// placement while the lane showed the new one.
+export class TrackOffsetCmd {
+    // `oldSec`/`newSec` are the track's placement offset in seconds; each is
+    // coerced to a finite number so a NaN/garbage argument can never become the
+    // stored value.
+    constructor({ trackId, oldSec, newSec } = {}) {
+        this.trackId = trackId;
+        this.oldSec = _placementSecPure(oldSec);
+        this.newSec = _placementSecPure(newSec);
+        // Placement-only: no note changes pitch or time in the chart, and the
+        // value lives on the song-level track container — the same two opt-outs
+        // TrimRegionCmd claims.
+        this.pitchPreserving = true;
+        this.songScope = true;
+        this._before = { taken: false, hadKey: false, value: undefined };
+        // Assigned by the caller (src/audio.js): () => _afterAudioShiftChange().
+        this.afterApply = null;
+    }
+
+    exec() {
+        if (this.newSec === this.oldSec) return;      // zero-delta: a true no-op
+        const track = trackOffsetTarget(this.trackId);
+        if (!track) return;
+        this._before = {
+            taken: true,
+            hadKey: Object.prototype.hasOwnProperty.call(track, 'offsetSec'),
+            value: track.offsetSec,
+        };
+        // Zero REMOVES the key rather than writing a 0 — normalize omits a zero
+        // offset anyway, so writing one would only leave residue the next
+        // normalize silently drops.
+        if (this.newSec) track.offsetSec = this.newSec;
+        else delete track.offsetSec;
+        if (typeof this.afterApply === 'function') this.afterApply();
+    }
+
+    rollback() {
+        if (!this._before.taken) return;
+        const track = trackOffsetTarget(this.trackId);
+        if (!track) return;
+        if (this._before.hadKey) track.offsetSec = this._before.value;
+        else delete track.offsetSec;
+        if (typeof this.afterApply === 'function') this.afterApply();
     }
 }

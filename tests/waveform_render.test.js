@@ -54,10 +54,15 @@ const ctx = {
 
 // TIMELINE_TOP = 0: the band's y-assertions below were written for the
 // pre-B3 layout; a zero header keeps them exact.
+// activeSourcePlacementSec is the ACTIVE source's composed placement (global
+// audioShift + source offset + per-track offset); it is injected as 0 — the
+// unshifted case this suite measures — because the Function below only has the
+// globals it is handed.
 const drawWaveform = new Function(
     'ctx', 'S', 'WAVEFORM_H', 'LABEL_W', 'TIMELINE_TOP', 'timeToX', 'xToTime',
+    'activeSourcePlacementSec',
     '"use strict";' + extractFn(src, 'drawWaveform') + '\nreturn drawWaveform;'
-)(ctx, S, WAVEFORM_H, LABEL_W, 0, timeToX, xToTime);
+)(ctx, S, WAVEFORM_H, LABEL_W, 0, timeToX, xToTime, () => 0);
 
 drawWaveform(800);
 

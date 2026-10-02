@@ -138,6 +138,56 @@ export function _regionContainsBeatPure(region, beat) {
     return b < start + len;
 }
 
+// ── Track placement (the per-track time offset) ───────────────────────
+// A track can be nudged in time independently of the whole song. The value is
+// SECONDS and lives on the track row inside the `editor_track_session`
+// manifest EXTENSION key — an `editor_`-prefixed key this editor owns, so
+// feedpak-spec §5.1 gains no top-level key and §1.2/§10's preserve-what-you-
+// don't-understand rule covers it. It is a PLACEMENT, not a content edit: no
+// sample and no note ever moves, which is what makes it non-destructive and
+// makes undo a matter of putting one field back.
+//
+// It composes with the other placement terms instead of replacing them:
+//
+//   global  S.audioShift      one value for the whole audio group (src/state.js)
+//   source  row.sourceOffset  per stem, baked into the manifest
+//   track   row.offsetSec     THIS offset — per track
+//
+// A track's placement is the SUM, so moving one track (or the global shift)
+// leaves the other two exactly where they were. `_trackPlacementPure` is the
+// one expression every placement site resolves through — audio.js (playback)
+// and parts-view.js (render) both call it, so the two can't drift apart.
+//
+// Only an AUDIO row carries one. A folder has no timeline of its own, and a
+// transcription track's placement is already expressed — and already
+// persisted, and already undoable — by its `regions[]`, which MoveRegionCmd
+// moves. Giving it a second, seconds-based axis on top would leave "where is
+// this content?" with two answers.
+
+// One placement term as a finite number of seconds, else 0. The
+// `Number.isFinite` guard is load-bearing, not paranoia: NaN and ±Infinity both
+// sail through `Number()` (and both are truthy, so `|| 0` won't catch them) and
+// would then poison every position derived from the sum. Same guard the backend
+// `_coerce_audio_shift` / `_coerce_track_offset` apply on the way in.
+export function _placementSecPure(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+}
+
+// A track's audio placement in chart seconds: the global shift, the source's own
+// offset and the track's offset, ADDED. Any one of them may be absent/garbage —
+// it contributes 0 and the rest stand.
+//
+// The SUM is finite-checked too, not just each term: three individually finite
+// values can still overflow to Infinity (1e308 + 1e308 + 1e308), and an Infinity
+// placement would flow straight into `timeToX()` and `node.start(when)`. An
+// overflowing offset is treated like any other garbage — 0 — rather than being
+// allowed to poison every position derived from it.
+export function _trackPlacementPure(audioShift, sourceOffset, trackOffset) {
+    const sum = _placementSecPure(audioShift) + _placementSecPure(sourceOffset) + _placementSecPure(trackOffset);
+    return Number.isFinite(sum) ? sum : 0;
+}
+
 // ── Layout (for drawing a region as a block on a track lane) ──────────
 
 // The region's TIME span on the timeline, given its lane's content extent
