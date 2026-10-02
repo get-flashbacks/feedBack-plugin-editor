@@ -60,10 +60,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `_coerce_track_offset`; a zero offset is omitted, so a project that never
   shifts a track keeps saving byte-identical. Only audio rows may carry one: a
   transcription track's placement is its `regions[]`, which `MoveRegionCmd`
-  already moves, and a folder has no timeline of its own. Input controls and
-  playback/render verification land in follow-up steps. As with `regions[]`, an
-  older editor opening a v4 pack rebuilds the tree field-by-field and drops the
-  offsets it doesn't know on its next save.
+  already moves, and a folder has no timeline of its own. Input controls (#42)
+  and the undo verification pass (#43) land in follow-up steps, as does bounding
+  the timeline duration and scroll by the per-track term (#48). As with
+  `regions[]`, an older editor opening a v4 pack rebuilds the tree field-by-field
+  and drops the offsets it doesn't know on its next save.
 
 - **`editor_cache/` is now included in Settings backups.** Uploaded audio,
   art, previews, and stem-session files for an in-progress (not yet
