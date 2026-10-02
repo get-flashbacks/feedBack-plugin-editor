@@ -857,7 +857,7 @@ function _editorAddSectionAtCursor() {
 }
 
 /* @pure:phrase-cmds:start */
-// Phrases (arr.phrases = [{name, number, start_time, levels}]) are the
+// Phrases (arr.phrases = [{name, number, start_time, tiers}]) are the
 // per-arrangement sibling of sections and likewise kept sorted by start_time.
 // Adding one used to raw push+sort with NO undo — the ONLY add-* verb that
 // bypassed EditHistory, so Ctrl+Z after a phrase-add rolled back the previous
@@ -868,7 +868,7 @@ function _editorAddSectionAtCursor() {
 // exec↔rollback restore that arrangement's phrases exactly, sort order included.
 class AddPhraseCmd {
     // songScope: a phrase is arrangement STRUCTURE (name/number/start_time/
-    // levels), never a fretted NOTE write — so the read-only-roll lock, which
+    // tiers), never a fretted NOTE write — so the read-only-roll lock, which
     // exists only to stop silent pitch writes to a fretted chart shown read-only
     // in the piano roll, must not refuse it. Without this the pre-history raw
     // push kept working in that view but routing through EditHistory would drop
@@ -897,7 +897,11 @@ function _editorAddPhraseAtCursor() {
     const num = arr.phrases.filter(p => p.name === name).length + 1;
     S.history.exec(new AddPhraseCmd(
         arr.phrases,
-        { name, number: num, start_time: snapTime(S.cursorTime || 0), levels: [] }));
+        // `tiers` (not `levels`) is the editor's per-difficulty copy of a
+        // phrase — routes.py `_repopulate_phrase_levels` writes `levels[]` from
+        // it on save. A fresh phrase starts empty: with no tier content the save
+        // path falls back to the flat chart for its window, exactly as before.
+        { name, number: num, start_time: snapTime(S.cursorTime || 0), tiers: [] }));
     host.draw();
     setStatus('Phrase added');
     return true;

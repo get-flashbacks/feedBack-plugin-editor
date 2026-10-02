@@ -1281,9 +1281,28 @@ export function _swapChartFields(arr, incoming) {
     // `anchors_user`/`anchors` were hand positions at old fret/note positions
     // (the backend re-computes anchors from the new notes on save when there's
     // no authored `anchors_user`); handshapes referenced old chord instances.
-    // `arr.phrases` is deliberately KEPT — phrases are time-anchored to the
-    // song's sections (which this swap does not touch) and their per-level notes
-    // repopulate from the new chart on save (_repopulate_phrase_levels).
+    // `arr.phrases` keeps its WINDOWS — phrases are time-anchored to the
+    // song's sections (which this swap does not touch) — but a tier's CONTENT
+    // is chart data: a tier is one difficulty of the chart being replaced, so
+    // keeping it would leave the low difficulties rendering the chart that was
+    // just thrown away (and handshapes pointing at the old templates). Hand the
+    // bare difficulty ladder to the flat save path
+    // (`_repopulate_phrase_levels` → `_flat_phrase_levels`) so every level
+    // refills from the new chart — emptying the tiers instead would leave the
+    // low difficulties silent.
+    //
+    // Deep-cloned into the snapshot (not by reference): the tiers are rewritten
+    // in place and `_restoreChartFields` is the only undo. Untiered
+    // arrangements are left entirely alone, snapshot and all.
+    if (Array.isArray(arr.phrases)
+        && arr.phrases.some(ph => Array.isArray(ph && ph.tiers))) {
+        snap.phrases = clone(arr.phrases);
+        for (const ph of arr.phrases) {
+            if (!Array.isArray(ph.tiers)) continue;
+            ph.levels = ph.tiers.map(t => ({ difficulty: t.difficulty }));
+            delete ph.tiers;
+        }
+    }
     delete arr._extendedStrings;
     delete arr.anchors_user;
     delete arr.anchors;

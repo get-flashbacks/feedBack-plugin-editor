@@ -154,6 +154,42 @@ t('replace KEEPS phrases (time-anchored song structure, not note-derived)', () =
     assert.deepStrictEqual(arr.phrases, [{ start_time: 0, levels: [] }]);
 });
 
+t('replace drops authored TIER content but keeps the difficulty ladder', () => {
+    // A tier is one difficulty of the chart being replaced — keeping its notes
+    // would leave the low difficulties rendering the discarded chart. The ladder
+    // itself is structure, so it survives and the flat save path refills it.
+    const arr = makeTargetArr();
+    arr.phrases = [{
+        name: 'verse', number: 1, start_time: 0, end_time: 4, max_difficulty: 9,
+        tiers: [
+            { difficulty: 3, notes: [{ time: 1, string: 0, fret: 0 }],
+              chords: [], anchors: [], handshapes: [] },
+            { difficulty: 9, notes: [{ time: 1, string: 6, fret: 3 }],
+              chords: [], anchors: [], handshapes: [] },
+        ],
+    }];
+    _swapChartFields(arr, makeIncoming());
+    const ph = arr.phrases[0];
+    assert.ok(!('tiers' in ph), 'tiers handed to the save path, not the chart');
+    assert.deepStrictEqual(ph.levels, [{ difficulty: 3 }, { difficulty: 9 }]);
+    // Phrase identity/metadata untouched.
+    assert.strictEqual(ph.name, 'verse');
+    assert.strictEqual(ph.max_difficulty, 9);
+});
+
+t('rollback restores authored tiers exactly', () => {
+    const arr = makeTargetArr();
+    arr.phrases = [{
+        name: 'verse', start_time: 0, end_time: 4, max_difficulty: 9,
+        tiers: [{ difficulty: 3, notes: [{ time: 1, string: 0, fret: 0 }],
+                  chords: [], anchors: [], handshapes: [] }],
+    }];
+    const before = JSON.parse(JSON.stringify(arr));
+    const snap = _swapChartFields(arr, makeIncoming());
+    _restoreChartFields(arr, snap);
+    assert.deepStrictEqual(arr, before);
+});
+
 t('rollback restores the exact pre-swap arrangement', () => {
     const arr = makeTargetArr();
     const before = JSON.parse(JSON.stringify(arr));
