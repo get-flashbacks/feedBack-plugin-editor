@@ -10,7 +10,7 @@ import { hideContextMenu } from './context-menu.js';
 import { DRUM_PIECE_META, _refreshDrumEditButton } from './drum.js';
 import { beatOf, timeOf } from './beats.js';
 import { LABEL_W, TIMELINE_TOP, timeToX, xToTime } from './geometry.js';
-import { _regionBannerH, _regionBlockRectPure, _regionHitPure, _regionSnapStartPure, _regionTimeSpanPure, _trackRegionsResolvePure } from './region.js';
+import { _regionBannerH, _regionBlockRectPure, _regionHitPure, _regionSnapStartPure, _regionTimeSpanPure, _trackPlacementPure, _trackRegionsResolvePure } from './region.js';
 import { DeleteRegionCmd, MoveRegionCmd } from './region-commands.js';
 import { isDrumArrangement } from './drum-arrangement.js';
 import { arrKind } from './instrument.js';
@@ -125,17 +125,26 @@ export function _regionWaveWindowPure(region, shift, duration, beatToTime) {
     return { startTime, endTime: startTime + (srcOut - srcIn), srcIn, srcOut };
 }
 
+// An audio lane's placed window: the global shift, this source's own offset and
+// this track's own offset SUMMED (src/region.js "Track placement") — the same
+// expression src/audio.js schedules playback from, so the lane and the sound can
+// never be drawn/placed differently.
+function _audioRowShift(row) {
+    return _trackPlacementPure(S.audioShift, row.sourceOffset, row.offsetSec);
+}
+
 // An audio lane's waveform, when the host has one cached for the source (today:
 // the master mix via S.waveformPeaks; stems light up with the engine slice).
 // host.trackWaveform's inert default returns null — the lane then just shows its
 // background and downbeats. Drawn as one WINDOWED pass PER REGION: the default is
-// a single full-span region → the whole buffer at `shift`, identical to before;
-// a trimmed/moved region shows only its [srcIn,srcOut) slice under its own block.
+// a single full-span region → the whole buffer at the row's placement, identical
+// to before; a trimmed/moved region shows only its [srcIn,srcOut) slice under its
+// own block.
 function _drawTrackAudioWaveform(row, y0, laneH, w) {
     const data = host.trackWaveform(row.sourceId);
     if (!data || !data.peaks || !data.peaks.bins || !(data.duration > 0)) return;
     const pk = data.peaks;
-    const shift = (Number(S.audioShift) || 0) + (Number(row.sourceOffset) || 0);
+    const shift = _audioRowShift(row);
     const mid = y0 + laneH / 2;
     const amp = Math.max(2, laneH / 2 - 5);
     const fill = row.sourceKind === 'master' ? 'rgba(95,165,245,.72)' : 'rgba(74,205,220,.72)';
@@ -241,7 +250,7 @@ function _regionSpineColor(row) {
 function _laneContentTimeExtent(row, arrIdx) {
     if (row.type === 'audio') {
         const data = host.trackWaveform(row.sourceId);
-        const shift = (Number(S.audioShift) || 0) + (Number(row.sourceOffset) || 0);
+        const shift = _audioRowShift(row);
         if (data && data.duration > 0) return [shift, data.duration + shift];
         const dur = Number(S.duration) || 0;
         return dur > 0 ? [0, dur] : null;

@@ -4,7 +4,7 @@ The backend ``_coerce_track_session`` rebuilds every track field-by-field, so an
 unknown field is stripped on the save->build round-trip. These pin that a
 track's authored regions are PRESERVED, validated the same way the frontend
 ``src/region.js`` validates them, and that a default set is OMITTED so untouched
-packs stay byte-identical (and that the schema version is bumped to 3).
+packs stay byte-identical (and that the schema version is bumped to 4).
 """
 
 import yaml
@@ -65,7 +65,7 @@ def test_session_preserves_authored_regions_omits_defaults_and_bumps_version():
              "regions": [{"id": "region:1", "startBeat": 0, "lenBeat": None}]},  # default
         ],
     })
-    assert session["version"] == 3
+    assert session["version"] == 4
     master, gtr = session["tracks"]
     assert [r["id"] for r in master["regions"]] == ["r1", "r2"], "attached and sorted by startBeat"
     assert "regions" not in gtr, "a default region set leaves no residue"
