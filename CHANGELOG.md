@@ -152,6 +152,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A pack's authored per-phrase difficulty tiers no longer collapse into one
+  chart on save.** The editor authors a single flat note/chord/anchor list per
+  arrangement, and saving rebuilt every `phrases[].levels[]` entry from that one
+  flat slice for the phrase's window — so a pack that shipped distinct tiers (a
+  full chart down to simplified versions, which is what the mastery slider reads)
+  lost every lower tier on any edit, and `static/highway.js` then rendered the
+  original chart because the per-level notes were stale. Loading now hands the
+  editor `phrases[].tiers[]` — the same per-difficulty content in the editor's
+  own note/chord shape — and the save path writes it back to the existing on-disk
+  `levels[]`: authored lower tiers are persisted verbatim while the **top** tier
+  is rebuilt from the flat chart, because the top tier *is* the phrase's full
+  chart per core (`lib.song.parse_arrangement`) and is the only copy the editor
+  can edit. `tiers` is the editor's working copy and is stripped on save, so no
+  new manifest or arrangement key is introduced. On the frontend, tier content
+  rides the beat-primary tempo model — a tempo flex lifts and reprojects tier
+  notes, chords, anchors and handshapes instead of stranding them on the old
+  timeline (where the next save would have persisted those stale times) — and
+  replacing an arrangement's chart drops tier *content* while keeping the
+  difficulty ladder, so the low difficulties can't go on rendering the discarded
+  chart. A phrase with no authored tiers, and every pack saved before this,
+  keeps exactly the previous flat behavior. Note the deliberate limit: a chart
+  edit reaches the **top** tier only — an authored lower tier keeps its own
+  notes until it is edited as a tier (tier-authoring UI is not here yet), so a
+  note deleted from the chart stays visible at lower mastery until then. That
+  is the point of an authored simplification; it is called out so nobody reads
+  the tiers as a live mirror of the chart. Covered by
+  `tests/test_phrase_tiers.py` and `tests/phrase_tiers_tempo.test.mjs`.
+
 - **Creating a project from a multi-track MIDI no longer silently loses the
   drums.** Core's `list_midi_tracks` excludes channel-9 (a keys-import of a
   drum channel is empty), so a full-band MIDI's drum track never reached the
