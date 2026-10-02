@@ -3652,12 +3652,39 @@ export function _tempoPivotTimePure(beats, tempoSel) {
 // timeOf(S.beats, beat). Walk EVERY timed object in the song exactly once, so
 // lift / reproject / save-strip can never disagree about the set — drum hits,
 // sections, and per arrangement: notes, chords + chord notes, anchors,
-// anchors_user, handshapes (start+end), phrases. `visit(obj, tf, endKind)`:
+// anchors_user, handshapes (start+end), phrases, and a phrase's tiers (tier
+// notes, tier chords + their notes, tier anchors, tier handshapes).
+// `visit(obj, tf, endKind)`:
 //   tf      — the object's seconds field: 'time' | 'start_time' | 't'
 //   endKind — 'none' (a point), 'sustain' (note: time+sustain → beatEnd),
 //             or 'span' (handshape/phrase: end_time → beatEnd)
 // The start-beat field is always `beat`; a duration's end-beat is `beatEnd`.
 // Both are runtime-only caches — _buildSaveBody strips them off the wire.
+// The tier shape here matches `_stripTierBeats`, so the set that gets retimed
+// and the set that gets stripped can't drift.
+function _walkTierTimed(tier, visit) {
+    if (!tier || typeof tier !== 'object') return;
+    // Array.isArray (not `|| []`) so a malformed non-list member is skipped
+    // rather than throwing on iteration — `tiers` comes off the save payload.
+    // Matches the guard `_stripTierBeats` below uses.
+    if (Array.isArray(tier.notes)) {
+        for (const n of tier.notes) visit(n, 'time', 'sustain');
+    }
+    if (Array.isArray(tier.chords)) {
+        for (const ch of tier.chords) {
+            visit(ch, 'time', 'none');
+            if (Array.isArray(ch.notes)) {
+                for (const cn of ch.notes) visit(cn, 'time', 'sustain');
+            }
+        }
+    }
+    if (Array.isArray(tier.anchors)) {
+        for (const a of tier.anchors) visit(a, 'time', 'none');
+    }
+    if (Array.isArray(tier.handshapes)) {
+        for (const hs of tier.handshapes) visit(hs, 'start_time', 'span');
+    }
+}
 export function _eachTimed(visit) {
     if (S.drumTab && Array.isArray(S.drumTab.hits)) {
         for (const h of S.drumTab.hits) visit(h, 't', 'none');
@@ -3678,7 +3705,15 @@ export function _eachTimed(visit) {
         // the old timeline through lift/reproject. end_time (present on
         // server-loaded phrases) rides as a span; when absent, 'span' degrades
         // to a point, like handshapes.
-        for (const ph of (arr.phrases || [])) visit(ph, 'start_time', 'span');
+        for (const ph of (arr.phrases || [])) {
+            visit(ph, 'start_time', 'span');
+            // The phrase's per-difficulty tiers (routes.py `_phrase_with_tiers`)
+            // hold real note content, so they ride tempo edits exactly like the
+            // flat chart does — otherwise a tempo flex reprojected the chart and
+            // left every authored tier on the old timeline, and the next save
+            // persisted those stale times into `levels[]`.
+            for (const tier of (Array.isArray(ph.tiers) ? ph.tiers : [])) _walkTierTimed(tier, visit);
+        }
     }
 }
 
@@ -3748,6 +3783,14 @@ export function _stripChordBeats(ch) {
     if (Array.isArray(s.notes)) s.notes = s.notes.map(_stripBeat);
     return s;
 }
+export function _stripTierBeats(tier) {
+    const s = _stripBeat(tier);
+    if (Array.isArray(s.notes)) s.notes = s.notes.map(_stripBeat);
+    if (Array.isArray(s.chords)) s.chords = s.chords.map(_stripChordBeats);
+    if (Array.isArray(s.anchors)) s.anchors = s.anchors.map(_stripBeat);
+    if (Array.isArray(s.handshapes)) s.handshapes = s.handshapes.map(_stripBeat);
+    return s;
+}
 export function _stripArrangementBeats(a) {
     if (!a || typeof a !== 'object') return a;
     const out = { ...a };
@@ -3756,7 +3799,17 @@ export function _stripArrangementBeats(a) {
     if (Array.isArray(out.anchors)) out.anchors = out.anchors.map(_stripBeat);
     if (Array.isArray(out.anchors_user)) out.anchors_user = out.anchors_user.map(_stripBeat);
     if (Array.isArray(out.handshapes)) out.handshapes = out.handshapes.map(_stripBeat);
-    if (Array.isArray(out.phrases)) out.phrases = out.phrases.map(_stripBeat);
+    if (Array.isArray(out.phrases)) {
+        // A phrase's tiers carry their own note/chord/anchor/handshape content,
+        // so they need the same per-object strip the flat lists get — one level
+        // deeper than `_stripBeat`. Skipping them would leak `beat`/`beatEnd`
+        // into the save body, and routes.py would reject the unknown fields.
+        out.phrases = out.phrases.map(ph => {
+            const s = _stripBeat(ph);
+            if (Array.isArray(s.tiers)) s.tiers = s.tiers.map(_stripTierBeats);
+            return s;
+        });
+    }
     return out;
 }
 export function _stripBeatsFromSaveBody(body) {
