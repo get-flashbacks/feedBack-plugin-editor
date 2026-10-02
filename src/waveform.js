@@ -3,7 +3,7 @@
 // (a host hook, called by drawNow); the onset-strip and bookmark helpers are
 // internal.
 
-import { _ensureOnsets, _onsetStripEnabled } from './audio.js';
+import { _ensureOnsets, _onsetStripEnabled, activeSourcePlacementSec } from './audio.js';
 import { ctx } from './canvas.js';
 import { LABEL_W, TIMELINE_TOP, WAVEFORM_H, timeToX, xToTime } from './geometry.js';
 import { _bookmarks, editorWaveformVisible } from './input.js';
@@ -31,9 +31,18 @@ export function drawWaveform(w) {
     const N = pk.bins;
     const mid = TIMELINE_TOP + WAVEFORM_H / 2;
     const amp = WAVEFORM_H / 2 - 4;
-    // Audio placement shift: buffer-time B renders at timeToX(B + sh), so the
-    // waveform slides with the recording while the grid/notes stay put.
-    const sh = (Number(S.audioShift) || 0) + (Number(S.activeAudioSourceOffset) || 0);
+    // Audio placement: buffer-time B renders at timeToX(B + sh), so the waveform
+    // slides with the recording while the grid/notes stay put. `sh` is the
+    // ACTIVE source's composed placement — global audioShift + that source's own
+    // offset + that source's per-track offset (src/region.js) — the same value
+    // playback schedules from, so the two can't disagree.
+    // typeof-guarded per README "Testing conventions": a slice-based render suite
+    // extracts this function and injects only the globals it knows about, and the
+    // fallback is the pre-per-track-offset two-term sum, i.e. exactly today's
+    // behaviour. (src/audio.js always provides the helper in the real app.)
+    const sh = typeof activeSourcePlacementSec === 'function'
+        ? activeSourcePlacementSec()
+        : (Number(S.audioShift) || 0) + (Number(S.activeAudioSourceOffset) || 0);
     // Visible pixel span of the (shifted) audio, clamped to the waveform lane.
     const xLo = Math.max(LABEL_W, Math.floor(timeToX(sh)));
     const xHi = Math.min(w, Math.ceil(timeToX(dur + sh)));
@@ -96,7 +105,10 @@ function _drawOnsetStrip(w) {
     const dur = (S.audioBuffer && S.audioBuffer.duration) || S.duration || 0;
     if (dur <= 0) return;
     // Onsets are buffer-time; they render shifted with the audio (timeToX(t+sh)).
-    const sh = (Number(S.audioShift) || 0) + (Number(S.activeAudioSourceOffset) || 0);
+    // Same guard (and same pre-per-track-offset fallback) as drawWaveform above.
+    const sh = typeof activeSourcePlacementSec === 'function'
+        ? activeSourcePlacementSec()
+        : (Number(S.audioShift) || 0) + (Number(S.activeAudioSourceOffset) || 0);
     const xLo = Math.max(LABEL_W, Math.floor(timeToX(sh)));
     const xHi = Math.min(w, Math.ceil(timeToX(dur + sh)));
     // onsets are time-sorted and timeToX is monotonic, so the on-screen pixel

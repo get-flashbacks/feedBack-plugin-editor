@@ -12,10 +12,11 @@
  *     survives normalize (attached, sorted, deduped) and makes the tree
  *     non-default (so it persists); a lone DEFAULT region is OMITTED so the
  *     tree stays default and untouched packs save byte-identical;
- *   - VERSION is bumped to 3 and normalize is idempotent over region data.
+ *   - VERSION is bumped to 4 (v4 adds `offsetSec`) and normalize is idempotent
+ *     over region data.
  *
  * This suite fails on main: src/region.js does not exist there, and normalize
- * neither threads `regions` nor stamps version 3.
+ * neither threads `regions` nor stamps version 4.
  *
  * Run: node tests/track_regions.test.mjs
  */
@@ -122,17 +123,18 @@ t('_regionContainsBeatPure is a half-open window; full span is open to the end',
 });
 
 // ── Wiring through the track session (the real subject) ───────────────
-const empty = { version: 2, tracks: [], removedSourceIds: [], tempoGuideSourceId: '', tempoGuideLocked: false, tempoGuideMode: 'audio' };
+const empty = { version: 3, tracks: [], removedSourceIds: [], tempoGuideSourceId: '', tempoGuideLocked: false, tempoGuideMode: 'audio' };
 
-t('normalize stamps the v3 schema version', () => {
-    assert.strictEqual(_trackSessionNormalizePure(empty, sources, arrangements, drumTab).version, 3);
+t('normalize stamps the v4 schema version', () => {
+    assert.strictEqual(_trackSessionNormalizePure(empty, sources, arrangements, drumTab).version, 4);
 });
 
-t('MIGRATION: a v2 pack carries no regions; every track resolves to one default full region', () => {
+t('MIGRATION: a pre-v4 pack carries no regions and no offsets; every track resolves to one default full region', () => {
     const model = _trackSessionNormalizePure(empty, sources, arrangements, drumTab);
     assert.ok(model.tracks.length > 0);
     for (const track of model.tracks) {
         assert.ok(!('regions' in track), `${track.id} must carry no regions key after migration`);
+        assert.ok(!('offsetSec' in track), `${track.id} must carry no offsetSec key after migration`);
         assert.deepStrictEqual(_trackRegionsResolvePure(track.regions), [DEFAULT_REGION],
             `${track.id} resolves to exactly one default full-span region`);
     }

@@ -37,19 +37,20 @@ import { _partViewKeyPure } from './keys.js';
 import { arrKind, _arrTypeKind } from './instrument.js';
 import { _mixerPanelRefresh, _mixerPartStatePure, mixerSetPart, mixerTogglePart } from './mixer-panel.js';
 import { beatOf } from './beats.js';
-import { DEFAULT_REGION_ID, _placeAtStartBeatPure, _regionsAreDefaultPure, _trackRegionsNormalizePure } from './region.js';
+import { DEFAULT_REGION_ID, _placementSecPure, _placeAtStartBeatPure, _regionsAreDefaultPure, _trackRegionsNormalizePure } from './region.js';
 import { PlaceRegionCmd } from './region-commands.js';
 import { S, markSessionDirty } from './state.js';
 import { _editorEscHtml, setStatus } from './ui.js';
 
 const MASTER_ID = 'master';
 const DRUM_TARGET_ID = 'drums';
-// v3 adds the optional per-track `regions[]` (a track's content as placeable
-// blocks). Purely additive: a v2 tree has no `regions` and resolves to one
-// default full-span region per track, so the bump gates nothing — it only
-// marks the schema that can now carry regions. The backend `_coerce_track_session`
-// stamps the same version.
-const VERSION = 3;
+// v4 adds the optional per-AUDIO-track `offsetSec` — that track's own time
+// offset, composing with the global audioShift and the source's offset (see
+// src/region.js "Track placement"). Purely additive like v3's `regions[]`: a v3
+// tree has no `offsetSec` and resolves to zero, so the bump gates nothing — it
+// only marks the schema that can now carry it. The backend
+// `_coerce_track_session` stamps the same version.
+const VERSION = 4;
 const TRACK_LANE_DEFAULT = 56;
 
 // The Tracks-view kind badge [abbr, tooltip]. An audio row shows its LAYER
@@ -226,7 +227,17 @@ export function _trackSessionNormalizePure(raw, sources, arrangements, drumTab) 
             if (!visibleSourceIds.has(sourceId) || sourceLeaves.has(sourceId)) continue;
             sourceLeaves.add(sourceId);
             const audioRegions = _trackRegionsNormalizePure(item.regions);
+            // This track's own time offset in seconds, placed alongside — never
+            // folded into — the global audioShift and the source offset. Read
+            // only off an audio row: a hand-written `offsetSec` on a folder or a
+            // transcription row is dropped, so nothing can persist a value no
+            // placement site consumes. Omitted when zero, so a session with no
+            // offsets saves byte-identical. (No rounding here: the sanctioned
+            // writer, editorSetTrackOffset, is 1 ms, so a sub-microsecond value
+            // can only arrive from a hand-edited manifest.)
+            const offsetSec = _placementSecPure(item.offsetSec);
             tracks.push({ id, type: 'audio', sourceId, name: String(item.name || '').slice(0, 120), parentId: idOf(item.parentId),
+                ...(offsetSec ? { offsetSec } : {}),
                 ...(audioRegions.length && !_regionsAreDefaultPure(audioRegions) ? { regions: audioRegions } : {}) });
         } else {
             const targetId = idOf(item.targetId);
@@ -504,7 +515,8 @@ export function _trackSessionIsDefaultPure(session, sources, arrangements, drumT
     ];
     if (model.tracks.length !== canonical.length) return false;
     return model.tracks.every((track, index) =>
-        track.id === canonical[index] && track.type !== 'folder' && !track.name && !track.parentId && !track.regions);
+        track.id === canonical[index] && track.type !== 'folder' && !track.name && !track.parentId
+        && !track.regions && !track.offsetSec);
 }
 /* @pure:track-session:end */
 

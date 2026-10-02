@@ -42,6 +42,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-track time offset — the data model and command (no visible change yet).**
+  A track can now carry `offsetSec`: its OWN placement offset, in seconds,
+  independent of the song. Audio placement is now the sum of three additive terms
+  — the global `audio_shift` (`S.audioShift`, one value for the whole audio
+  group), the per-stem source offset already baked into the manifest, and this
+  new per-track offset — so moving one track leaves every other track *and* the
+  global shift exactly where they were, instead of dragging the whole mix.
+  Ships `TrackOffsetCmd` (container-only, like `TrimRegionCmd`: no sample and no
+  note moves, so undo is putting one field back, verbatim) plus the
+  `editorSetTrackOffset` / `editorNudgeTrackOffset` verbs at 1 ms resolution,
+  and threads the composed placement through both the scheduler
+  (`src/audio.js`) and the render (`src/parts-view.js`, `src/waveform.js`) so
+  the lane and the sound can't be drawn differently. Persistence rides the
+  existing `editor_track_session` tree (schema bumped to v4, purely additive —
+  v3 trees carry no `offsetSec` and need no migration) with backend coercion in
+  `_coerce_track_offset`; a zero offset is omitted, so a project that never
+  shifts a track keeps saving byte-identical. Only audio rows may carry one: a
+  transcription track's placement is its `regions[]`, which `MoveRegionCmd`
+  already moves, and a folder has no timeline of its own. Input controls and
+  playback/render verification land in follow-up steps. As with `regions[]`, an
+  older editor opening a v4 pack rebuilds the tree field-by-field and drops the
+  offsets it doesn't know on its next save.
+
 - **`editor_cache/` is now included in Settings backups.** Uploaded audio,
   art, previews, and stem-session files for an in-progress (not yet
   saved/exported) editing session live under `editor_cache/`

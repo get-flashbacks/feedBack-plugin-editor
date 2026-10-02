@@ -209,7 +209,8 @@ t('a failed slow path DEMOTES to 100% and plays the buffer — never silence und
     const run = new Function('S', '_auditionActive', '_startRefMediaAt',
         '_mixApplyFirstPlayFade', '_stopRefMedia', '_auditionRefreshUi', 'setStatus',
         '_ensureRefGain', '_activeRefTarget', '_anchorTransportAtCursor', '_stopStemSources', '_startStemSources',
-        '_audioRegionPlacementsPure', '_trackRegionsForSourceId', 'timeOf', '_regionStartPure',
+        '_audioRegionPlacementsPure', '_audioTrackForSourceId', 'activeSourcePlacementSec',
+        'timeOf', '_regionStartPure',
         '_audioSourceGroup', '_declickEnvelopePure', 'DECLICK_FADE',
         extractFn('_startAudioSourceAtCursor') + '\nreturn _startAudioSourceAtCursor;'
     )(S,
@@ -218,7 +219,9 @@ t('a failed slow path DEMOTES to 100% and plays the buffer — never silence und
         () => {}, () => {}, () => {}, (m) => status.push(m), () => null, () => ({ connect() {} }),
         () => {}, () => {}, () => 0,        // stem scheduler stubs (no stems here)
         () => [{ startBeatTime: 0, srcIn: 0, srcOut: 60, muted: false }],
-        () => null, (_beats, beat) => beat,
+        () => null,                        // _audioTrackForSourceId → no track row
+        () => 0,                           // activeSourcePlacementSec → no placement shift
+        (_beats, beat) => beat,
         () => ({ play: true, offset: 5, delay: 0, duration: 55 }),
         (nodes) => nodes[0], () => [], 0.005);
 
@@ -251,7 +254,8 @@ t('the active reference schedules every authored audio region (it is not skipped
     const run = new Function('S', '_auditionActive', '_startRefMediaAt',
         '_mixApplyFirstPlayFade', '_stopRefMedia', '_auditionRefreshUi', 'setStatus',
         '_ensureRefGain', '_activeRefTarget', '_anchorTransportAtCursor', '_stopStemSources', '_startStemSources',
-        '_audioRegionPlacementsPure', '_trackRegionsForSourceId', 'timeOf', '_regionStartPure',
+        '_audioRegionPlacementsPure', '_audioTrackForSourceId', 'activeSourcePlacementSec',
+        'timeOf', '_regionStartPure',
         '_audioSourceGroup', '_declickEnvelopePure', 'DECLICK_FADE',
         extractFn('_startAudioSourceAtCursor') + '\nreturn _startAudioSourceAtCursor;'
     )(S,
@@ -262,7 +266,9 @@ t('the active reference schedules every authored audio region (it is not skipped
             { startBeatTime: 0, srcIn: 2, srcOut: 8, muted: false },
             { startBeatTime: 10, srcIn: 1, srcOut: 4, muted: false },
         ],
-        () => [], (_beats, beat) => beat,
+        () => null,                        // _audioTrackForSourceId → no authored regions
+        () => 0,                           // activeSourcePlacementSec → no placement shift
+        (_beats, beat) => beat,
         (cursor, start, srcIn, srcOut) => cursor >= start
             ? { play: true, offset: srcIn + cursor - start, delay: 0, duration: srcOut - srcIn - (cursor - start) }
             : { play: true, offset: srcIn, delay: start - cursor, duration: srcOut - srcIn },

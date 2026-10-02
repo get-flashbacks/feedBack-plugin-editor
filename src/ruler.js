@@ -31,7 +31,7 @@
  * 'barsel' drag). No DOM, no listeners of its own — nothing to tear down.
  */
 
-import { _ensureOnsets, _ensureOnsetsShifted, startPlayback, stopPlayback } from './audio.js';
+import { _ensureOnsets, _ensureOnsetsShifted, activeSourcePlacementSec, startPlayback, stopPlayback } from './audio.js';
 import { ctx } from './canvas.js';
 import { _mapHealthProblemsPure, _mapHealthPure, _mapHealthStepProblemPure, MAP_HEALTH_COLORS } from './map-health.js';
 import {
@@ -73,7 +73,11 @@ export function _mapHealthResults() {
     // shift is non-zero, so keying on IT would miss every frame and put the
     // O(bars × beats) scan straight back on the draw path.
     const raw = (typeof _ensureOnsets === 'function') ? _ensureOnsets() : null;
-    const shift = Number(S.audioShift) || 0;
+    // The memo key must be the FULL composed placement, not just S.audioShift:
+    // nudging one track changes the chart-time onsets exactly as much as sliding
+    // the whole recording does, so a shift-only key would keep serving a lens
+    // computed for the old placement.
+    const shift = activeSourcePlacementSec();
     const gen = typeof editGen === 'number' ? editGen : 0;
     if (_mhMemo.gen === gen && _mhMemo.onsetsRef === raw && _mhMemo.shift === shift
             && _mhMemo.beatsRef === beats && _mhMemo.result) {

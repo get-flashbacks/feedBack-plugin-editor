@@ -835,6 +835,29 @@ def _region_num_or_none(value):
     return n if math.isfinite(n) and n > 0 else None
 
 
+def _coerce_track_offset(value):
+    """A track's placement `offsetSec` (seconds) as a finite float, else None.
+
+    Mirrors `_coerce_audio_shift`'s rounding and isfinite guard — a per-track
+    offset is the same kind of supplementary alignment state, so NaN/±Infinity/
+    garbage drops to None rather than raising, and the microsecond round keeps
+    the YAML stable. None is returned (not 0.0) for a second reason: it is what
+    tells `_coerce_track_session` to leave the key OUT of the row entirely, so a
+    project with no offsets keeps saving byte-identical.
+
+    `bool` is rejected explicitly. JSON `true` reaches Python as True, and
+    `float(True)` is a cheerful 1.0 — a JSON type mistake would silently become a
+    one-second nudge rather than the no-op the client actually asked for.
+    """
+    if isinstance(value, bool):
+        return None
+    try:
+        offset = round(float(value), 6)
+    except (TypeError, ValueError):
+        return None
+    return offset if math.isfinite(offset) else None
+
+
 def _regions_are_default(regions):
     """A normalized `regions[]` that is just the implicit default — empty, or a
     lone full-span region with no trim/label/mute. Such a set persists as NO
@@ -887,9 +910,10 @@ def _coerce_track_session(value, invalid=_FIELD_ABSENT):
     The tree intentionally carries only identity/order relationships —
     track rows referencing sources ('master' / bare stem ids) and chart
     tracks (stemLinks' keys), optional folders, non-destructive source
-    removals, and the tempo-guide role. No filesystem paths, no display
-    HTML, no tempo data; rows are resolved against the freshly-loaded song
-    on the client (unknown references drop, new song parts append)."""
+    removals, per-audio-track placement (`offsetSec`, v4) and the tempo-guide
+    role. No filesystem paths, no display HTML, no tempo data; rows are
+    resolved against the freshly-loaded song on the client (unknown references
+    drop, new song parts append)."""
     if not isinstance(value, dict) or not isinstance(value.get("tracks"), list):
         return invalid
     out, seen = [], set()
@@ -915,6 +939,15 @@ def _coerce_track_session(value, invalid=_FIELD_ABSENT):
             regions = _coerce_track_regions(raw.get("regions"))
             if regions:
                 track["regions"] = regions
+            # This audio row's own time offset. Zero is omitted rather than
+            # stored (it is the implicit default), and it composes with — never
+            # replaces — the global `audio_shift` and the source's own offset;
+            # see src/region.js "Track placement". Only audio rows may carry one:
+            # a transcription row's placement is its `regions[]`, and a folder
+            # has no timeline of its own.
+            offset_sec = _coerce_track_offset(raw.get("offsetSec"))
+            if offset_sec:
+                track["offsetSec"] = offset_sec
             out.append(track)
         else:
             target_id = _track_session_id(raw.get("targetId"))
@@ -940,7 +973,7 @@ def _coerce_track_session(value, invalid=_FIELD_ABSENT):
             removed_sources.append(source_id)
     guide = _track_session_id(value.get("tempoGuideSourceId"))
     guide_mode = "metronome" if value.get("tempoGuideMode") == "metronome" else "audio"
-    return {"version": 3, "tracks": out, "removedSourceIds": removed_sources,
+    return {"version": 4, "tracks": out, "removedSourceIds": removed_sources,
             "tempoGuideSourceId": guide, "tempoGuideLocked": bool(value.get("tempoGuideLocked")),
             "tempoGuideMode": guide_mode}
 
