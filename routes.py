@@ -1048,7 +1048,7 @@ _sessions = None
 
 # Authorable note technique fields, in a fixed order. The Note dataclass
 # attribute name and the wire/JSON key are identical, so this single tuple
-# drives both `_tech_dict` (the save/wire surface) and the arrangement
+# drives both `_note_tech_dict` (the editor/save surface) and the arrangement
 # content signature (`_align_xml_files_to_arrangements`) — keeping the two
 # in lockstep so a newly-added technique can't silently drop out of either.
 _NOTE_TECH_FIELDS = (
@@ -1068,8 +1068,8 @@ _NOTE_TECH_FIELDS = (
 )
 # `bend_values` (the §6.2.1 bend curve) is deliberately NOT in the tuple above:
 # it's a list, and the tuple feeds hashable content-signature tuples
-# (`_obj_note_sig` / `_dict_note_sig`). It's handled explicitly in `_tech_dict`
-# (load) and `_arr_dict_to_wire` (save) instead.
+# (`_obj_note_sig` / `_dict_note_sig`). It's handled explicitly in
+# `_note_tech_dict` (load) and `_editor_note_to_wire` (save) instead.
 
 
 # Techniques the save path (`_arr_dict_to_wire`) coerces with `_safe_bool`.
@@ -3026,6 +3026,102 @@ def _compute_anchors(notes, chords, width=_ANCHOR_WIDTH):
     return anchors
 
 
+def _editor_note_to_wire(n):
+    """One editor-shaped note → one wire note (§6.2).
+
+    Editor uses {time, string, fret, sustain, techniques: {bend, slide_to,
+    ...}}; the wire format uses {t, s, f, sus, sl, bn, ho, ...}. Module-level
+    rather than a closure of `_arr_dict_to_wire` so the per-phrase tier path
+    (`_authored_phrase_levels`) writes authored tier notes through exactly the
+    same validation as the arrangement's flat `notes` — a tier note can't end up
+    shaped (or validated) differently from a chart note.
+    """
+    tech = n.get("techniques", {}) or {}
+    out = {
+        "t": round(float(n.get("time", 0)), 3),
+        "s": int(n.get("string", 0)),
+        "f": int(n.get("fret", 0)),
+        "sus": round(float(n.get("sustain", 0)), 3),
+        "sl": _safe_int(tech.get("slide_to"), -1),
+        "slu": _safe_int(tech.get("slide_unpitch_to"), -1),
+        "bn": round(_safe_float(tech.get("bend"), 0.0), 1),
+        # `_safe_bool` so wire-style strings like "false" / "0" can't
+        # silently flip a technique on via Python's string truthiness.
+        "ho": _safe_bool(tech.get("hammer_on")),
+        "po": _safe_bool(tech.get("pull_off")),
+        "hm": _safe_bool(tech.get("harmonic")),
+        "hp": _safe_bool(tech.get("harmonic_pinch")),
+        "pm": _safe_bool(tech.get("palm_mute")),
+        "mt": _safe_bool(tech.get("mute")),
+        "tr": _safe_bool(tech.get("tremolo")),
+        "ac": _safe_bool(tech.get("accent")),
+        "tp": _safe_bool(tech.get("tap")),
+        "ln": _safe_bool(tech.get("link_next")),
+        "vb": _safe_bool(tech.get("vibrato")),
+        "fhm": _safe_bool(tech.get("fret_hand_mute")),
+        "plk": _safe_bool(tech.get("pluck")),
+        "slp": _safe_bool(tech.get("slap")),
+        "rh": _safe_int(tech.get("right_hand"), -1),
+        "pkd": _safe_int(tech.get("pick_direction"), -1),
+        "ig": _safe_bool(tech.get("ignore")),
+    }
+    # Bend shape (§6.2.1) — default-omitted, matching core's note_to_wire:
+    # `bt` only when non-zero, `bnv` only when a curve is present.
+    _bt = _safe_int(tech.get("bend_intent"), 0)
+    if _bt:
+        out["bt"] = _bt
+    _bnv = _safe_bend_curve(tech.get("bend_values"))
+    if _bnv:
+        out["bnv"] = _bnv
+    # Teaching marks (§6.2.2) — default-omitted, matching core's note_to_wire.
+    # Display only; never used for grading. Range-guarded server-side so a
+    # malformed/out-of-range client value (the inspector clamps, but loaded
+    # or hand-edited data may not) is treated as unset rather than emitted as
+    # a schema-invalid `fg`/`ch`/`sd` (spec §6.2.2: fg 0–4, sd 0–11, ch ≥ 0).
+    _fg = _safe_int(tech.get("fret_finger"), -1)
+    if 0 <= _fg <= 4:
+        out["fg"] = _fg
+    _ch = _safe_int(tech.get("strum_group"), -1)
+    if _ch >= 0:
+        out["ch"] = _ch
+    _sd = _safe_int(tech.get("scale_degree"), -1)
+    if 0 <= _sd <= 11:
+        out["sd"] = _sd
+    # Keys hand assignment — default-omitted, strictly validated to the
+    # 'lh'/'rh' enum so junk (or a bool, or 'LH') never rides the wire.
+    # Spelled-out key: `rh` is taken (right_hand, the plucking finger).
+    _hand = tech.get("hand")
+    if _hand in ("lh", "rh"):
+        out["hand"] = _hand
+    return out
+
+
+def _editor_note_in_chord_to_wire(n):
+    """A chord note's wire shape: `_editor_note_to_wire` without `t` — a chord
+    note is struck with its chord, so it carries no time of its own (§6.3.1)."""
+    d = _editor_note_to_wire(n)
+    d.pop("t", None)
+    return d
+
+
+def _editor_chord_to_wire(c):
+    """One editor-shaped chord → one wire chord (§6.3).
+
+    Module-level for the same reason as `_editor_note_to_wire`: an authored
+    phrase tier's chords go through the arrangement's chord conversion, so a
+    tier can't emit a chord shape the flat `chords` list can't.
+    """
+    return {
+        "t": round(float(c.get("time", 0)), 3),
+        "id": int(c.get("chord_id", -1)),
+        "hd": _safe_bool(c.get("high_density")),
+        "notes": [_editor_note_in_chord_to_wire(cn) for cn in c.get("notes", [])],
+        # Harmony function (§6.3.1) — default-omitted, range-guarded so a
+        # partial / out-of-range fn never rides the wire (matches core).
+        **({"fn": _cfn} if (_cfn := _chord_fn_wire(c.get("fn"))) else {}),
+    }
+
+
 def _arr_dict_to_wire(
     name, tuning, capo, notes, chords, chord_templates,
     *, tones=None, handshapes=None, anchors_user=None,
@@ -3033,95 +3129,21 @@ def _arr_dict_to_wire(
     """Convert editor's long-named arrangement dict into sloppak wire format.
 
     Editor uses {time, string, fret, sustain, techniques: {bend, slide_to,
-    ...}}; the wire format uses {t, s, f, sus, sl, bn, ho, ...}.
+    ...}}; the wire format uses {t, s, f, sus, sl, bn, ho, ...}. The note and
+    chord conversions are `_editor_note_to_wire` / `_editor_chord_to_wire`, so
+    the per-phrase tier path writes tier content the same way.
 
     `tones` (opaque {base, changes, definitions}) round-trips verbatim
     through the sloppak loader. `handshapes` / `anchors_user` (when
     provided) replace the empty defaults the wire emits, so the editor's
     authored values survive save → reload.
     """
-    def _note(n):
-        tech = n.get("techniques", {}) or {}
-        out = {
-            "t": round(float(n.get("time", 0)), 3),
-            "s": int(n.get("string", 0)),
-            "f": int(n.get("fret", 0)),
-            "sus": round(float(n.get("sustain", 0)), 3),
-            "sl": _safe_int(tech.get("slide_to"), -1),
-            "slu": _safe_int(tech.get("slide_unpitch_to"), -1),
-            "bn": round(_safe_float(tech.get("bend"), 0.0), 1),
-            # `_safe_bool` so wire-style strings like "false" / "0" can't
-            # silently flip a technique on via Python's string truthiness.
-            "ho": _safe_bool(tech.get("hammer_on")),
-            "po": _safe_bool(tech.get("pull_off")),
-            "hm": _safe_bool(tech.get("harmonic")),
-            "hp": _safe_bool(tech.get("harmonic_pinch")),
-            "pm": _safe_bool(tech.get("palm_mute")),
-            "mt": _safe_bool(tech.get("mute")),
-            "tr": _safe_bool(tech.get("tremolo")),
-            "ac": _safe_bool(tech.get("accent")),
-            "tp": _safe_bool(tech.get("tap")),
-            "ln": _safe_bool(tech.get("link_next")),
-            "vb": _safe_bool(tech.get("vibrato")),
-            "fhm": _safe_bool(tech.get("fret_hand_mute")),
-            "plk": _safe_bool(tech.get("pluck")),
-            "slp": _safe_bool(tech.get("slap")),
-            "rh": _safe_int(tech.get("right_hand"), -1),
-            "pkd": _safe_int(tech.get("pick_direction"), -1),
-            "ig": _safe_bool(tech.get("ignore")),
-        }
-        # Bend shape (§6.2.1) — default-omitted, matching core's note_to_wire:
-        # `bt` only when non-zero, `bnv` only when a curve is present.
-        _bt = _safe_int(tech.get("bend_intent"), 0)
-        if _bt:
-            out["bt"] = _bt
-        _bnv = _safe_bend_curve(tech.get("bend_values"))
-        if _bnv:
-            out["bnv"] = _bnv
-        # Teaching marks (§6.2.2) — default-omitted, matching core's note_to_wire.
-        # Display only; never used for grading. Range-guarded server-side so a
-        # malformed/out-of-range client value (the inspector clamps, but loaded
-        # or hand-edited data may not) is treated as unset rather than emitted as
-        # a schema-invalid `fg`/`ch`/`sd` (spec §6.2.2: fg 0–4, sd 0–11, ch ≥ 0).
-        _fg = _safe_int(tech.get("fret_finger"), -1)
-        if 0 <= _fg <= 4:
-            out["fg"] = _fg
-        _ch = _safe_int(tech.get("strum_group"), -1)
-        if _ch >= 0:
-            out["ch"] = _ch
-        _sd = _safe_int(tech.get("scale_degree"), -1)
-        if 0 <= _sd <= 11:
-            out["sd"] = _sd
-        # Keys hand assignment — default-omitted, strictly validated to the
-        # 'lh'/'rh' enum so junk (or a bool, or 'LH') never rides the wire.
-        # Spelled-out key: `rh` is taken (right_hand, the plucking finger).
-        _hand = tech.get("hand")
-        if _hand in ("lh", "rh"):
-            out["hand"] = _hand
-        return out
-
-    def _note_in_chord(n):
-        d = _note(n)
-        d.pop("t", None)
-        return d
-
     wire = {
         "name": name,
         "tuning": list(tuning),
         "capo": int(capo),
-        "notes": [_note(n) for n in notes],
-        "chords": [
-            {
-                "t": round(float(c.get("time", 0)), 3),
-                "id": int(c.get("chord_id", -1)),
-                "hd": _safe_bool(c.get("high_density")),
-                "notes": [_note_in_chord(cn) for cn in c.get("notes", [])],
-                # Harmony function (§6.3.1) — default-omitted, range-guarded so a
-                # partial / out-of-range fn never rides the wire (matches core).
-                **({"fn": _cfn} if (_cfn := _chord_fn_wire(c.get("fn"))) else {}),
-            }
-            for c in chords
-        ],
+        "notes": [_editor_note_to_wire(n) for n in notes],
+        "chords": [_editor_chord_to_wire(c) for c in chords],
         # Mirror `_build_arrangement_xml`'s semantic: when authored anchors
         # validate to a non-empty list, persist them; otherwise fall back
         # to `_compute_anchors` so the saved sloppak never ends up with
@@ -3717,9 +3739,141 @@ def _populate_notation_notes(arrangements, notation_by_id):
         ]
 
 
-def _repopulate_phrase_levels(phrases, notes, chords, anchors):
-    """Re-slice each phrase level's notes/chords/anchors from the flat
-    editor lists.
+def _tier_timed_items(tier, key):
+    """The editor-shaped objects a phrase tier carries under `key`, dropping
+    anything that isn't a dict. Defensive on purpose: `tiers` rides the client's
+    save payload, so a malformed entry (or a non-list `key`) is skipped rather
+    than raising — the tier is authored data, not chart structure, and losing
+    one malformed note must not fail the whole save."""
+    items = tier.get(key)
+    if not isinstance(items, list):
+        return []
+    return [x for x in items if isinstance(x, dict)]
+
+
+def _tier_wire_items(tier, key, convert):
+    """`_tier_timed_items`, each entry run through `convert` to its wire shape.
+
+    Each member is converted on its own so one bad entry can only cost itself.
+    A dict can be well-typed enough to pass `_tier_timed_items` and still make
+    the converter raise (`time: "abc"`, `string: null`, `techniques: 5`, a chord
+    whose `notes` is null) — and `tiers` comes straight off the client's save
+    payload, where the old code could not even see it. Failing the whole save
+    over one authored note would lose the user's chart; skipping the note keeps
+    the tier, exactly like `_valid_anchor_dicts` / `_valid_handshape_dicts`
+    dropping the bad members they find.
+    """
+    out = []
+    for item in _tier_timed_items(tier, key):
+        try:
+            out.append(convert(item))
+        except (TypeError, ValueError, AttributeError):
+            continue
+    return out
+
+
+def _phrase_tiers_by_difficulty(tiers):
+    """An authored phrase's `tiers` as `{difficulty: tier}`, or `{}` when the
+    phrase has none.
+
+    An empty result means "no authored tiers" and routes the phrase through
+    `_flat_phrase_levels` — today's behavior, so a phrase the editor never
+    tiered (or a client still sending the wire `levels` shape) keeps working.
+
+    A tier's difficulty must be a non-negative int. There is deliberately NO
+    upper bound: the spec types `levels[].difficulty` as a bare integer with no
+    `maximum` (and a pack may legitimately scale past 10), so capping here
+    would silently drop a schema-legal tier — losing content, or dropping the
+    whole ladder when it was the only tier.
+
+    On a repeated difficulty the FIRST tier wins. Core keys its levels by
+    difficulty so a pack can't contain one, but this dict is fed client data —
+    and dropping the whole ladder (the alternative) would cost far more than
+    ignoring a duplicate the editor never meant to send.
+    """
+    if not isinstance(tiers, list):
+        return {}
+    out = {}
+    for tier in tiers:
+        if not isinstance(tier, dict):
+            continue
+        d = _safe_int(tier.get("difficulty"), -1)
+        if d >= 0 and d not in out:
+            out[d] = tier
+    return out
+
+
+def _authored_phrase_levels(tiers, pn, pc, pa, *, levels=(),
+                            n_chord_templates=None):
+    """The wire `levels[]` for a phrase that carries authored tiers.
+
+    The HIGHEST tier is the phrase's full chart: the editor's flat
+    note/chord/anchor lists are that tier — core builds a phrase's flat
+    contribution from its top authored level (`lib.song.parse_arrangement`),
+    and it's also the only copy the editor's UI can edit — so it's re-sliced
+    from them here and a chart edit reaches every difficulty. The LOWER tiers
+    are the authored simplifications, written verbatim, which is what finally
+    lets the highway's mastery filter (`phrases[].levels[idx].notes`) show
+    something other than one chart repeated N times.
+
+    Levels come out sorted by difficulty, matching core's own emission.
+
+    `levels` is the incoming wire ladder (when a client shipped both shapes),
+    so each emitted level starts as a copy of its old entry and unknown keys
+    survive exactly as they do on the flat path — the five keys below are the
+    only ones this path owns. `n_chord_templates` applies the arrangement's
+    `chord_id` bound to per-tier handshapes, mirroring `_arr_dict_to_wire`.
+    """
+    by_diff = {}
+    for lv in levels or ():
+        if isinstance(lv, dict):
+            by_diff.setdefault(_safe_int(lv.get("difficulty"), -1), lv)
+    top = max(tiers)
+    out = []
+    for d in sorted(tiers):
+        tier = tiers[d]
+        if d == top:
+            notes, chords, anchors = pn, pc, pa
+        else:
+            notes = _tier_wire_items(tier, "notes", _editor_note_to_wire)
+            chords = _tier_wire_items(tier, "chords", _editor_chord_to_wire)
+            anchors = _valid_anchor_dicts(tier.get("anchors"))
+        handshapes = [
+            h for h in _valid_handshape_dicts(tier.get("handshapes"))
+            if n_chord_templates is None or h["chord_id"] < n_chord_templates
+        ]
+        new_lv = dict(by_diff.get(d) or {})
+        new_lv.update(
+            difficulty=d,
+            notes=list(notes),
+            chords=list(chords),
+            anchors=list(anchors),
+            handshapes=handshapes,
+        )
+        out.append(new_lv)
+    return out
+
+
+def _flat_phrase_levels(levels, pn, pc, pa):
+    """Every level of a phrase gets the SAME flat-chart slice for its time
+    window — the mastery slider is a no-op (each level renders the same notes)
+    but the chart stays correct. Handshapes round-trip verbatim: the editor
+    doesn't expose them and they're tied to chord templates that don't shift
+    on per-note edits. Used for phrases with no authored `tiers`."""
+    out = []
+    for lv in levels:
+        new_lv = dict(lv)
+        new_lv["notes"] = list(pn)
+        new_lv["chords"] = list(pc)
+        new_lv["anchors"] = list(pa)
+        out.append(new_lv)
+    return out
+
+
+def _repopulate_phrase_levels(phrases, notes, chords, anchors, *,
+                              n_chord_templates=None):
+    """Rebuild each phrase's `levels[]` — from its authored `tiers` when it has
+    them, else from the flat editor lists.
 
     The editor authors a single flat note/chord/anchor list per
     arrangement; the multi-level `phrases[].levels[]` structure comes
@@ -3729,12 +3883,21 @@ def _repopulate_phrase_levels(phrases, notes, chords, anchors):
     notes and silently renders the original chart — additions, edits,
     and deletions all vanish.
 
-    Repopulating every level with the same flat-list slice for the
-    phrase's time window makes the mastery slider a no-op (each
-    level renders the same notes) but keeps the rest of the chart
-    correct. Handshapes round-trip verbatim — the editor doesn't
-    expose them and they're tied to chord templates that don't shift
-    on per-note edits.
+    Two shapes of source data reach here:
+
+    * **Authored tiers** (`phrases[].tiers[]`, the editor's per-difficulty
+      copy of a phrase, in the editor's note/chord shape) — `_authored_phrase_levels`
+      keeps the authored lower tiers and rebuilds the top tier from the flat
+      slice, so both goals hold: the chart stays editable, and a pack that
+      already has distinct tiers keeps them. `tiers` wins when a client ships
+      both `tiers` and `levels`.
+    * **No tiers** (a single-arrangement disk save, or a client still sending
+      the wire `levels[]` shape) — `_flat_phrase_levels` gives every level the
+      same slice, the pre-tier behavior.
+
+    `tiers` is the editor's working copy, not a pack field, so it is stripped
+    from every emitted phrase — `levels[]` remains the only per-tier data on
+    disk (no new manifest/arrangement key is introduced).
 
     Phrase boundaries are derived from each phrase's `start_time`
     and the *next* phrase's `start_time` (with the first phrase's
@@ -3760,15 +3923,17 @@ def _repopulate_phrase_levels(phrases, notes, chords, anchors):
         pn = [x for x in notes if t0 <= _safe_float(x.get("t"), 0.0) < t1]
         pc = [x for x in chords if t0 <= _safe_float(x.get("t"), 0.0) < t1]
         pa = [x for x in anchors if t0 <= _safe_float(x.get("time"), 0.0) < t1]
-        new_levels = []
-        for lv in p.get("levels", []):
-            new_lv = dict(lv)
-            new_lv["notes"] = list(pn)
-            new_lv["chords"] = list(pc)
-            new_lv["anchors"] = list(pa)
-            new_levels.append(new_lv)
+        tiers = _phrase_tiers_by_difficulty(p.get("tiers"))
         new_p = dict(p)
-        new_p["levels"] = new_levels
+        if tiers:
+            new_p["levels"] = _authored_phrase_levels(
+                tiers, pn, pc, pa, levels=p.get("levels") or (),
+                n_chord_templates=n_chord_templates,
+            )
+        else:
+            new_p["levels"] = _flat_phrase_levels(
+                p.get("levels", []), pn, pc, pa)
+        new_p.pop("tiers", None)
         out.append(new_p)
     return out
 
@@ -4127,6 +4292,85 @@ def _build_arrangement_xml(
     return dom.toprettyxml(indent="  ", encoding=None)
 
 
+def _editor_note(n):
+    """A parsed note-like object → the editor's note shape
+    ({time, string, fret, sustain, techniques}) — the inverse of
+    `_editor_note_to_wire`, and the shape every editor-side note list uses
+    (the flat chart, a chord's notes, a phrase tier's notes)."""
+    return {
+        "time": round(n.time, 3),
+        "string": n.string,
+        "fret": n.fret,
+        "sustain": round(n.sustain, 3),
+        "techniques": _note_tech_dict(n),
+    }
+
+
+def _editor_chord(ch):
+    """A parsed chord → the editor's chord shape ({time, chord_id,
+    high_density, fn, notes}), whose notes are `_editor_note`s. The inverse of
+    `_editor_chord_to_wire`."""
+    return {
+        "time": round(ch.time, 3),
+        "chord_id": ch.chord_id,
+        "high_density": ch.high_density,
+        "fn": getattr(ch, "fn", None),
+        "notes": [_editor_note(cn) for cn in (getattr(ch, "notes", None) or [])],
+    }
+
+
+def _phrase_tier(level):
+    """A parsed `PhraseLevel` → one editor phrase tier: the same per-difficulty
+    content as the on-disk `levels[]` entry, in the editor's shape.
+
+    `tiers` is the editor's working copy of a phrase's difficulty ladder. It
+    carries exactly what an authored tier persists — the phrase's
+    notes/chords/anchors/handshapes for one difficulty — so
+    `_authored_phrase_levels` can write it back out as `levels[]`. Handshapes
+    ride each tier even though the editor can't author them per tier: they're
+    bound to the arrangement's chord templates, and per-tier handshapes are the
+    one thing that would otherwise be silently flattened away on save.
+    """
+    return {
+        "difficulty": _safe_int(getattr(level, "difficulty", 0), 0),
+        "notes": [_editor_note(n)
+                  for n in (getattr(level, "notes", None) or [])],
+        "chords": [_editor_chord(c)
+                   for c in (getattr(level, "chords", None) or [])],
+        "anchors": [
+            {"time": round(a.time, 3), "fret": a.fret, "width": a.width}
+            for a in (getattr(level, "anchors", None) or [])
+        ],
+        "handshapes": [
+            {
+                "chord_id": h.chord_id,
+                "start_time": round(h.start_time, 3),
+                "end_time": round(h.end_time, 3),
+                "arp": bool(getattr(h, "arpeggio", False)),
+            }
+            for h in (getattr(level, "hand_shapes", None) or [])
+        ],
+    }
+
+
+def _phrase_with_tiers(phrase_wire, levels):
+    """A phrase as the editor should hold it: its wire fields minus `levels`,
+    plus the `tiers` ladder built from the parsed `Phrase.levels`.
+
+    `tiers` REPLACES the wire `levels` mirror rather than joining it. Both
+    carry the same per-difficulty content in two shapes — the wire's `t`/`s`/`f`
+    short keys and the editor's `time`/`string`/`fret` + `techniques` — and only
+    one of them may ride the editor's arrangement model: `tiers`, because it's
+    the editor-shaped one the flat chart is made of (so tempo edits reach it and
+    a chart edit reaches the top tier), and because shipping both would double
+    every tier's payload and leave a second copy nothing keeps in sync. The save
+    path (`_repopulate_phrase_levels`) writes `levels[]` back from it.
+    """
+    out = {k: v for k, v in phrase_wire.items() if k != "levels"}
+    out["tiers"] = [_phrase_tier(lv) for lv in (levels or [])]
+    return out
+
+
 def _arr_to_data(arr, name):
     """Turn a parsed `lib.song` arrangement into the editor's arrangement dict.
 
@@ -4165,31 +4409,10 @@ def _arr_to_data(arr, name):
         })
 
     for n in arr.notes:
-        arr_data["notes"].append({
-            "time": round(n.time, 3),
-            "string": n.string,
-            "fret": n.fret,
-            "sustain": round(n.sustain, 3),
-            "techniques": _note_tech_dict(n),
-        })
+        arr_data["notes"].append(_editor_note(n))
 
     for ch in arr.chords:
-        chord_data = {
-            "time": round(ch.time, 3),
-            "chord_id": ch.chord_id,
-            "high_density": ch.high_density,
-            "fn": getattr(ch, "fn", None),
-            "notes": [],
-        }
-        for cn in ch.notes:
-            chord_data["notes"].append({
-                "time": round(cn.time, 3),
-                "string": cn.string,
-                "fret": cn.fret,
-                "sustain": round(cn.sustain, 3),
-                "techniques": _note_tech_dict(cn),
-            })
-        arr_data["chords"].append(chord_data)
+        arr_data["chords"].append(_editor_chord(ch))
 
     for ct in arr.chord_templates:
         arr_data["chord_templates"].append({
@@ -5125,7 +5348,15 @@ def setup(app, context):
                     for h in (arr.hand_shapes or [])
                 ]
                 if arr.phrases:
-                    arr_data["phrases"] = [phrase_to_wire(p) for p in arr.phrases]
+                    # The editor's per-difficulty content rides as `tiers`
+                    # (editor-shaped), not the wire `levels` mirror — see
+                    # `_phrase_with_tiers`. `levels[]` stays the only per-tier
+                    # data on disk: `_repopulate_phrase_levels` writes it back
+                    # from `tiers` on save.
+                    arr_data["phrases"] = [
+                        _phrase_with_tiers(phrase_to_wire(p), p.levels)
+                        for p in arr.phrases
+                    ]
 
             return (
                 result,
@@ -5377,8 +5608,9 @@ def setup(app, context):
             output_path = (dlc_dir / filename).resolve()
 
             # Build the wire JSON for one arrangement. Anchors / handshapes /
-            # tones come through the kwargs; phrases stay opaque passthrough
-            # (the editor UI still doesn't author phrase tiers).
+            # tones come through the kwargs; phrases are rebuilt by
+            # `_repopulate_phrase_levels` — from their authored `tiers` when
+            # the client ships them, else from the flat chart slice.
             def _build_wire(arr_dict, is_first):
                 # Anchors: prefer the authored `anchors_user` key when
                 # it's present (even if explicitly empty — empty means
@@ -5417,6 +5649,7 @@ def setup(app, context):
                 if ph:
                     wire["phrases"] = _repopulate_phrase_levels(
                         ph, wire["notes"], wire["chords"], wire["anchors"],
+                        n_chord_templates=len(wire["templates"]),
                     )
                 if is_first:
                     wire["beats"], wire["sections"] = _wire_beats_sections(
@@ -9713,9 +9946,10 @@ def setup(app, context):
 
         # Mirror the Note dataclass surface — every authorable technique
         # round-trips so the editor can render and re-emit them. Shared with the
-        # import path via the module-level helper (field set + per-field absent
-        # defaults live there) so load and import stay byte-identical.
-        _tech_dict = _note_tech_dict
+        # import path via the module-level helpers (`_editor_note` /
+        # `_editor_chord`, whose technique dict is `_note_tech_dict` — field set
+        # + per-field absent defaults live there) so load and import stay
+        # byte-identical.
 
         for arr in song.arrangements:
             arr_data = {
@@ -9762,33 +9996,12 @@ def setup(app, context):
             arr_data["anchors_user"] = list(anchors_payload)
 
             for n in arr.notes:
-                arr_data["notes"].append({
-                    "time": round(n.time, 3),
-                    "string": n.string,
-                    "fret": n.fret,
-                    "sustain": round(n.sustain, 3),
-                    "techniques": _tech_dict(n),
-                })
+                arr_data["notes"].append(_editor_note(n))
 
             for ch in arr.chords:
-                chord_data = {
-                    "time": round(ch.time, 3),
-                    "chord_id": ch.chord_id,
-                    "high_density": ch.high_density,
-                    # Harmony function (§6.3.1) rides the instance; core already
-                    # validated it on decode (partial/invalid -> None).
-                    "fn": getattr(ch, "fn", None),
-                    "notes": [],
-                }
-                for cn in ch.notes:
-                    chord_data["notes"].append({
-                        "time": round(cn.time, 3),
-                        "string": cn.string,
-                        "fret": cn.fret,
-                        "sustain": round(cn.sustain, 3),
-                        "techniques": _tech_dict(cn),
-                    })
-                arr_data["chords"].append(chord_data)
+                # Harmony function (§6.3.1) rides the instance; core already
+                # validated it on decode (partial/invalid -> None).
+                arr_data["chords"].append(_editor_chord(ch))
 
             for ct in arr.chord_templates:
                 arr_data["chord_templates"].append({
