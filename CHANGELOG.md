@@ -176,6 +176,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The context menu and the add-note dialog stay fully on screen, and the
+  canvas re-renders crisply after a monitor or zoom change.** Both popovers were
+  positioned straight from the event's `clientX`/`clientY`, so a right-click or
+  double-click near an edge opened them partly (or wholly) past the viewport.
+  They now unhide first, measure their real `offsetWidth`/`offsetHeight`, and
+  clamp the position through a shared pure helper (`_clampPopoverPos` in
+  `src/ui.js`, `@pure:popover-clamp`) against `window.innerWidth`/`Height` —
+  a popover wider or taller than the viewport pins at 0, which leaves as much of
+  it visible as there is room for. Separately, `DPR` was read once at module
+  load and never again, so dragging the window to a monitor with a different
+  scale factor — or an OS/browser zoom change, neither of which fires a window
+  `resize` — kept rendering the canvas at the old pixel density until a reload.
+  `_watchDpr` (`src/canvas.js`) re-reads `devicePixelRatio` from a one-shot
+  `matchMedia('(resolution: Ndppx)')` query that re-arms itself at the new DPR
+  every time it fires (the same query object only ever matches once) and calls
+  `resizeCanvas()`, which re-derives `canvas.width`/`height` off the live
+  binding. The screen teardown now disposes that watcher, so a re-injection
+  can't stack a second one holding the previous injection's `resizeCanvas`
+  closure. Covered by `tests/popover_clamp.test.mjs` and
+  `tests/dpr_watch.test.mjs` (#30).
+
 - **A pack's authored per-phrase difficulty tiers no longer collapse into one
   chart on save.** The editor authors a single flat note/chord/anchor list per
   arrangement, and saving rebuilt every `phrases[].levels[]` entry from that one

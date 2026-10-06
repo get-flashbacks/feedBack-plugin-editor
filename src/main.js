@@ -878,6 +878,9 @@ if (typeof window.__editorScreenTeardown === 'function') {
 }
 const _globalListeners = _makeListenerRegistry();
 let _editorScreenObs = null;
+// Dispose handle for this injection's DPR watcher (canvas.js's _watchDpr) —
+// released by the teardown below so a re-injection can't stack a second one.
+let _watchDprDispose = null;
 // Handle for the pre-canvas boot poller (setInterval below) so the teardown
 // can stop a late-firing interval from re-running a torn-down injection.
 let _bootPollInterval = null;
@@ -901,6 +904,10 @@ window.__editorScreenTeardown = () => {
     // The canvas-wrap ResizeObserver: without this it stacks one per re-inject,
     // each holding a resizeCanvas closure over a replaced DOM.
     try { if (_canvasWrapObs) { _canvasWrapObs.disconnect(); _canvasWrapObs = null; } } catch (_) {}
+    // Same story for the DPR watcher: the pending matchMedia subscription is
+    // module-level in canvas.js, so a stale one would call the previous
+    // injection's resizeCanvas (and stack one watcher per re-inject).
+    try { if (_watchDprDispose) { _watchDprDispose(); _watchDprDispose = null; } } catch (_) {}
     // Stop the pre-canvas boot poller if it's still spinning.
     try { if (_bootPollInterval) { clearInterval(_bootPollInterval); _bootPollInterval = null; } } catch (_) {}
     // Release the drum strip's MIDI monitor tap + device session (no-op if it
@@ -2333,8 +2340,9 @@ function init() {
     // window 'resize' — canvas.js's cached DPR was never refreshed for this,
     // so the canvas kept rendering at the old pixel density. resizeCanvas()
     // reads the live DPR binding to re-derive canvas.width/height off the
-    // new value.
-    _watchDpr(() => resizeCanvas());
+    // new value. The watcher hands back a dispose handle; the screen teardown
+    // drops it so a re-injection can't stack a second one.
+    _watchDprDispose = _watchDpr(() => resizeCanvas());
     // src/create.js's global 'input' listener. It used to be a top-level
     // statement in this file; a module must not have import-time side effects.
     initCreate();
