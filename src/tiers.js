@@ -14,7 +14,7 @@
 // tier's source content is the easiest existing tier's notes/chords (or the
 // flat chart while the ladder is still empty), simplified by dropping chain
 // members (hammer-on/pull-off), stripping lead techniques (bend/slide/tap) and
-// bend curves, and cutting micro-sustains. This module PLANNS that — pure, no
+// bend curves, and cutting micro-sustains. This module PLANS that — pure, no
 // `S`, no DOM, no imports — so the UI (and the tests) get a refusal-or-ladder
 // answer without ever aliasing live editor state. Refusal meanings:
 //
