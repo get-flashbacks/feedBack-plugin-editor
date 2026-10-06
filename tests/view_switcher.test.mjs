@@ -506,25 +506,7 @@ t('editorSelectArrangement closes the context menu and add-note popover', () => 
         'the closures happen before the switch itself');
 });
 
-t('no stale idx survives the switch: a menu action cannot target the old arrangement', () => {
-    // The whole point of #28: an action captured while the menu was open on
-    // arrangement A holds A's idx. After switching to B (which has a
-    // DIFFERENT number of notes), that idx must no longer be reachable — the
-    // menu is gone, so no captured action can fire against B's notes().
-    // Prove it by counting: the switch path closes the menu, leaving zero
-    // open menus and zero captured actions to misapply.
-    Object.assign(S, {
-        arrangements: [GTR('Lead'), GTR('Bass'), DRUMS()], currentArr: 0,
-        drumTab: { version: 1 }, format: 'sloppak',
-        tabViewMode: false, drumEditMode: false, drumSel: new Set(), sel: new Set(),
-    });
-    const { fn, counts } = makeSwitcher();
-    fn('1');   // Bass
-    assert.strictEqual(counts.menuClosures, 1, 'the menu (and its captured idx) is closed');
-    assert.strictEqual(counts.addNoteClosures, 1,
-        'the add-note popover (and its captured idx) is closed');
-    assert.strictEqual(S.currentArr, 1, 'the switch itself still happened');
-});
+
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
