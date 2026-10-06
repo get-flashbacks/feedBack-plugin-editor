@@ -12,7 +12,9 @@
 //
 // So "add a tier" means minting a rung BELOW the lowest authored one: the new
 // tier's source content is the easiest existing tier's notes/chords (or the
-// flat chart while the ladder is still empty), simplified by dropping chain
+// flat chart while the ladder is still empty — and also when the ladder holds
+// a SINGLE tier, which is the top tier and therefore tracks the editable flat
+// chart rather than its loaded copy), simplified by dropping chain
 // members (hammer-on/pull-off), stripping lead techniques (bend/slide/tap) and
 // bend curves, and cutting micro-sustains. This module PLANS that — pure, no
 // `S`, no DOM, no imports — so the UI (and the tests) get a refusal-or-ladder
@@ -435,13 +437,20 @@ function _copyTier(t) {
 //    droppedChain, stripped, droppedShort, thinned} — the ladder to store, or
 //   {error, message} — a refusal (`floor|empty|wiped|noop`), never a throw.
 //
-// The new rung's source content is the EASIEST existing tier's notes/chords
-// (or, with no authored tiers yet, the flat chart slice); its anchors/
-// handshapes come from that same source (falling back to the window's when the
-// tier lacks them). With no existing tiers the ladder is a fresh [0=simplified,
+// The new rung's source content is the EASIEST existing tier's notes/chords —
+// except when the ladder holds a SINGLE tier. That lone tier is the TOP tier,
+// which the save path rebuilds from the editable flat chart on every save
+// (`_authored_phrase_levels` re-slices the max-difficulty rung from the flat
+// lists), so the tier's loaded copy goes stale the moment the user edits the
+// chart. Sourcing from the live window slice keeps the derived rung current
+// (and below, the lone tier re-emits above it with the window's chart content
+// for the same reason). With NO tiers at all the source is likewise the flat
+// chart slice. With no existing tiers the ladder is a fresh [0=simplified,
 // 1=full-chart-copy] pair (maxDifficulty 1, or the phrase's DECLARED wire
-// `max_difficulty` when larger); with existing tiers the new rung lands at
-// `minDifficulty - 1`.
+// `max_difficulty` when larger); with a lone top tier the new rung lands at
+// `minDifficulty - 1` (never 0 here — the floor guard answered first) and the
+// floor's own rung re-emits above it from the same window; with a real ladder
+// the new rung lands at `minDifficulty - 1` above the untouched ladder.
 export function planTierSimplification(phrase, window, opts) {
     const p = (phrase && typeof phrase === 'object') ? phrase : {};
     const win = (window && typeof window === 'object') ? window : {};
@@ -460,15 +469,20 @@ export function planTierSimplification(phrase, window, opts) {
         };
     }
 
-    const fromTier = ladder.length > 0;   // new rung sources the easiest authored tier…
-    const easiest = fromTier ? ladder[0].tier : null;   // …else the flat chart
+    // A lone tier is the top tier: source notes/chords from the live flat
+    // chart, not the tier's loaded copy (see the planner docblock). Only the
+    // SOURCE comes from the window — the lone tier itself rides on (rebuilt
+    // from the same chart on save).
+    const fromTier = ladder.length > 0;   // an authored ladder exists…
+    const easiestIsTop = fromTier && ladder.length === 1;   // …but a lone tier is the top tier…
+    const easiest = fromTier && !easiestIsTop ? ladder[0].tier : null;   // …else the flat chart
 
     // SOURCE content (raw, pre-simplification), fall back to the window's
-    // lists when the tier lacks them.
-    const rawNotes = fromTier && Array.isArray(easiest.notes)
+    // lists when there is no source tier (or the tier lacks them).
+    const rawNotes = easiest !== null && Array.isArray(easiest.notes)
         ? easiest.notes
         : (Array.isArray(win.notes) ? win.notes : []);
-    const rawChords = fromTier && Array.isArray(easiest.chords)
+    const rawChords = easiest !== null && Array.isArray(easiest.chords)
         ? easiest.chords
         : (Array.isArray(win.chords) ? win.chords : []);
 
@@ -481,11 +495,13 @@ export function planTierSimplification(phrase, window, opts) {
 
     // Anchors/handshapes for the NEW rung: the source tier's own lists when it
     // carries them (fall back to the window's otherwise), else the window's
-    // own — handshapes normalized to the tier shape either way.
-    const rawAnchors = (fromTier && Array.isArray(easiest.anchors))
+    // own — handshapes normalized to the tier shape either way. A lone top
+    // tier has no source role, so its anchors/handshapes fall back to the
+    // window's here (same as the fresh ladder).
+    const rawAnchors = (easiest !== null && Array.isArray(easiest.anchors))
         ? easiest.anchors
         : (Array.isArray(win.anchors) ? win.anchors : []);
-    const rawHandshapes = (fromTier && Array.isArray(easiest.handshapes))
+    const rawHandshapes = (easiest !== null && Array.isArray(easiest.handshapes))
         ? easiest.handshapes
         : (Array.isArray(win.handshapes) ? win.handshapes : []);
 
@@ -514,22 +530,28 @@ export function planTierSimplification(phrase, window, opts) {
     const handshapes = _normalizeHandshapes(rawHandshapes);
     const anchors = _clonedObjectMembers(rawAnchors);
 
-    if (!fromTier) {
-        // Fresh ladder: [0 = simplified, 1 = the full chart verbatim]. The top
+    if (!fromTier || easiestIsTop) {
+        // Fresh ladder — or a lone top tier gaining its first authored lower
+        // rung: [simplified below, full chart verbatim at (its) top]. The top
         // rung is the editable flat chart copy — the pair the save path will
         // slice/keep verbatim; the content is cloned so each tier owns it.
-        const maxDifficulty = Math.max(1, _declaredMaxDifficulty(p) || 0);
+        // The new rung lands one below the ladder floor (0 for a fresh ladder,
+        // min − 1 for a lone top tier at min > 0 — never a difficulty-0 floor
+        // here, the floor guard answered first).
+        const floorDifficulty = easiestIsTop ? ladder[0].difficulty : 1;
+        const target = floorDifficulty - 1;   // ≥ 0: floor guard passed (fresh: 1−1)
+        const maxDifficulty = Math.max(floorDifficulty, _declaredMaxDifficulty(p) || 0);
         return {
             tiers: [
                 {
-                    difficulty: 0,
+                    difficulty: target,
                     notes: simpNotes.notes,
                     chords: simpChords.chords,
                     anchors,
                     handshapes,
                 },
                 {
-                    difficulty: 1,
+                    difficulty: floorDifficulty,
                     notes: _clonedObjectMembers(win.notes),
                     chords: _clonedObjectMembers(win.chords),
                     anchors: _clonedObjectMembers(win.anchors),
@@ -537,7 +559,7 @@ export function planTierSimplification(phrase, window, opts) {
                 },
             ],
             maxDifficulty,
-            addedDifficulty: 0,
+            addedDifficulty: target,
             srcNoteCount,
             keptNoteCount: simpNotes.notes.length,
             droppedChain: simpNotes.droppedChain,

@@ -233,9 +233,10 @@ t('integration: window slice → plan → exec yields the two-rung ladder; undo/
 });
 
 // The cascade: a ladder topping out above 0 grows a rung at min-1 (each press
-// re-source's the easiest tier's own content, in this arc "derive from the
-// easiest existing tier"), and the descent stops at a difficulty-0 rung — the
-// ladder-shape floor check answers 'floor' BEFORE content is even read.
+// re-sources the easiest tier's own content when the ladder is real), and the
+// descent stops at a difficulty-0 rung — the ladder-shape floor check answers
+// 'floor' BEFORE content is even read. A LONE top tier is the exception: it
+// sources the live chart (and re-emits from it), not its loaded copy.
 t('cascade: an existing ladder grows a rung at minDifficulty-1; a difficulty-0 floor refuses', () => {
     const env = makeEnv();
     const ph = { name: 'phrase', number: 1, start_time: 0,
@@ -243,12 +244,13 @@ t('cascade: an existing ladder grows a rung at minDifficulty-1; a difficulty-0 f
     const from = windowForPhrase([ph], 0);
     const win = { notes: sliceByWindow(ph.tiers[0].notes, from.t0, from.t1), chords: [], anchors: [], handshapes: [] };
 
-    // First press on the mid-ladder phrase: the new rung lands one below the
-    // ladder floor, and the top rung stays verbatim above it.
+    // First press on the mid-ladder phrase: the lone top tier sources the
+    // LIVE chart (the window, not its own loaded copy) and re-emits from it;
+    // the new rung lands one below the ladder floor.
     const plan = planTierSimplification(ph, win, { minSustain: null });
     assert.ok(!plan.error, 'harness: the mid-ladder phrase plans — ' + (plan.message || 'ok'));
     assert.strictEqual(plan.addedDifficulty, 1, 'the new rung lands one below the ladder floor');
-    assert.deepStrictEqual(plan.tiers.map(tr => tr.difficulty), [1, 2], 'the existing rung stays verbatim above');
+    assert.deepStrictEqual(plan.tiers.map(tr => tr.difficulty), [1, 2], 'the top rung re-emits above it');
     const prevTiers = ph.tiers;
     env.S.history.exec(new env.SimplifyPhraseCmd(ph, prevTiers, plan.tiers, ph.max_difficulty, plan.maxDifficulty));
     assert.strictEqual(ph.tiers, plan.tiers);

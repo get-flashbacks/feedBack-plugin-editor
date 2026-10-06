@@ -52,9 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replay their anchor note), the lead articulations (bend, bend intent, both
   slides, tap) strip to their load defaults with bend curves nulled, dense
   chords thin to low density, and positive sustains under half a local beat are
-  dropped (sustain-0/unknown lengths are kept). The rung lands one difficulty
+  dropped (sustain-0/unknown lengths are kept).   The rung lands one difficulty
   below the easiest existing tier — repeated presses keep re-deriving from that
-  easiest tier until the difficulty-0 floor refuses — and the top tier stays the
+  easiest tier until the difficulty-0 floor refuses (a lone tier is the top
+  tier, so it derives from the live chart and re-emits from it) — and the top tier stays the
   editable chart; save repopulates `levels[]` via `_repopulate_phrase_levels`
   exactly as before, so the game's slider finally sees the authored rungs.
   Refusals — a difficulty-0 floor already authored, no notes or chords in the

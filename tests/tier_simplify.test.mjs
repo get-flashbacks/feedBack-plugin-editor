@@ -343,6 +343,44 @@ test('planTierSimplification: garbage max_difficulty is ignored', () => {
     assert.strictEqual(res.maxDifficulty, 1);
 });
 
+test('planTierSimplification: a LONE top tier sources the live chart, not the tier copy', () => {
+    // A single rung at difficulty N is the top tier — the editable flat chart
+    // copy save rebuilds on write. If the user edited the chart after load,
+    // the loaded tier copy is stale: the new rung must derive from the live
+    // window slice, and re-emit the top rung from it too.
+    const stale = bendNote(0.0);   // the chart's bent note, edited away since
+    const live = plainNote(0.0);
+    const phrase = freshPhrase({
+        max_difficulty: 2,
+        tiers: [{
+            difficulty: 2,
+            notes: [stale, chainNote(0.5)],
+            chords: [],
+            anchors: [],
+            handshapes: [],
+        }],
+    });
+    const win = {
+        notes: [live, chainNote(0.5)],
+        chords: [],
+        anchors: [anchor(0.25)],
+        handshapes: [handshape(0.0, 2.0)],
+    };
+    const res = planTierSimplification(phrase, win, { minSustain: 0.2 });
+    assert.ok(!res.error, `unexpected refusal: ${res.error}`);
+    assert.deepStrictEqual(res.tiers.map(t => t.difficulty), [1, 2]);
+    assert.strictEqual(res.addedDifficulty, 1, 'one below the lone top tier');
+    assert.strictEqual(res.maxDifficulty, 2, 'declared max preserved');
+    assert.strictEqual(res.stripped, 0, 'the LIVE source is already plain — nothing stripped');
+    assert.deepStrictEqual(res.tiers[0].notes.map(n => n.time), [0.0],
+        'chain member still drops out of the new rung');
+    // The re-emitted top rung is the live window copy, not the stale tier:
+    // no stale bend survives, and the window's anchors/handshapes ride it.
+    assert.deepStrictEqual(res.tiers[1].notes, win.notes);
+    assert.deepStrictEqual(res.tiers[1].anchors, [anchor(0.25)]);
+    assert.deepStrictEqual(res.tiers[1].handshapes, [handshape(0.0, 2.0)]);
+});
+
 test('planTierSimplification: tiers [1,3] → rung 0 derived from tier 1 itself', () => {
     const tier1 = {
         difficulty: 1,
@@ -375,14 +413,18 @@ test('planTierSimplification: tiers [1,3] → rung 0 derived from tier 1 itself'
 });
 
 test('planTierSimplification: tier without anchors/handshapes falls back to the window', () => {
-    // The bend note keeps the simplification from being a noop, so the rung
-    // actually gets built (and its anchors/handshapes come from the window).
+    // A MULTI-tier ladder sources the easiest tier: the bend note keeps the
+    // simplification from being a noop, so the rung actually gets built (and
+    // its anchors/handshapes come from the window).
     const phrase = freshPhrase({
-        tiers: [{
-            difficulty: 2,
-            notes: [plainNote(0.25), bendNote(0.5)],
-            chords: [],
-        }],
+        tiers: [
+            {
+                difficulty: 1,
+                notes: [plainNote(0.25), bendNote(0.5)],
+                chords: [],
+            },
+            { difficulty: 2, notes: [plainNote(0.25)], chords: [] },
+        ],
     });
     const res = planTierSimplification(phrase, window_(), { minSustain: 0.2 });
     assert.ok(!res.error, `unexpected refusal: ${res.error}`);
@@ -395,10 +437,21 @@ test('planTierSimplification: refuses empty when the source has no notes and no 
     assert.strictEqual(fresh.error, 'empty');
     assert.ok(typeof fresh.message === 'string' && fresh.message.length > 0, 'human message');
     // Same guard on the authored-ladder path (the window has content — the
-    // refusal proves the SOURCE pick is the tier's own empty content).
+    // refusal proves the SOURCE pick is the tier's own empty content). A lone
+    // top tier is exempt: it sources the live chart, so an empty TIER with a
+    // full window plans a rung instead of refusing.
     const phrase = freshPhrase({ tiers: [{ difficulty: 2, notes: [], chords: [] }] });
     const tiered = planTierSimplification(phrase, window_(), { minSustain: 0.2 });
-    assert.strictEqual(tiered.error, 'empty');
+    assert.ok(!tiered.error, `lone top tier plans from the window: ${tiered.error}`);
+    const multi = freshPhrase({
+        tiers: [
+            { difficulty: 1, notes: [], chords: [] },
+            { difficulty: 2, notes: [], chords: [] },
+        ],
+    });
+    assert.strictEqual(
+        planTierSimplification(multi, window_(), { minSustain: 0.2 }).error, 'empty',
+        'a multi-tier ladder with empty easiest tier still refuses');
 });
 
 test('planTierSimplification: refuses wiped when simplification empties the phrase', () => {
@@ -413,9 +466,12 @@ test('planTierSimplification: refuses wiped when simplification empties the phra
     assert.ok(typeof res.message === 'string' && res.message.length > 0);
 });
 
-test('planTierSimplification: a ladder holding only chain notes cascades to wiped', () => {
+test('planTierSimplification: a multi-tier ladder of chain notes cascades to wiped', () => {
     const phrase = freshPhrase({
-        tiers: [{ difficulty: 1, notes: [chainNote(0), chainNote(1)], chords: [] }],
+        tiers: [
+            { difficulty: 1, notes: [chainNote(0), chainNote(1)], chords: [] },
+            { difficulty: 2, notes: [chainNote(0), chainNote(1)], chords: [] },
+        ],
     });
     const res = planTierSimplification(phrase, window_(), { minSustain: 0.2 });
     assert.strictEqual(res.error, 'wiped');
