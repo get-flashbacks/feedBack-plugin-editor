@@ -98,6 +98,7 @@ export const EDITOR_MENUS = Object.freeze([
         { hdr: 'Markers' },
         { cmd: 'addSection' },
         { cmd: 'addPhrase' },
+        { cmd: 'simplifyPhrase' },
         { cmd: 'setAnchor' },
         { cmd: 'addToneChange' },
         { cmd: 'addHandshape' },

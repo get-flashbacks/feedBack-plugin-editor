@@ -42,6 +42,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-phrase difficulty tiers are now authorable outright — "Simplify phrase
+  at cursor" (`Alt+P`).** The mastery slider reads `phrases[].levels[]`, and
+  until now an editor save could carry lower tiers only when the pack already
+  had one — there was no way to create the easier chart. With the cursor inside
+  a phrase (Add ▸ Markers, or the shortcut panel), the command derives one from
+  what the phrase holds and installs it in the ladder as `phrases[].tiers[]`
+  through the undo history: hammer-on/pull-off chain members are dropped (they
+  replay their anchor note), the lead articulations (bend, bend intent, both
+  slides, tap) strip to their load defaults with bend curves nulled, dense
+  chords thin to low density, and positive sustains under half a local beat are
+  dropped (sustain-0/unknown lengths are kept). The rung lands one difficulty
+  below the easiest existing tier — repeated presses keep re-deriving from that
+  easiest tier until the difficulty-0 floor refuses — and the top tier stays the
+  editable chart; save repopulates `levels[]` via `_repopulate_phrase_levels`
+  exactly as before, so the game's slider finally sees the authored rungs.
+  Refusals — a difficulty-0 floor already authored, no notes or chords in the
+  window, a simplification that would wipe or duplicate the content — are
+  statuses only and never enter undo history. Deliberate limit: a chart edit
+  reaches the top tier only and lower tiers keep their content until
+  re-authored — there is still no per-tier, note-by-note hand-editing UI.
+  Planner in `src/tiers.js`; covered by `tests/tier_simplify.test.mjs`,
+  `tests/phrase_tier_commands.test.mjs`, and `tests/test_phrase_tier_authoring.py`.
+
 - **Per-track time offset — the data model and command (no visible change yet).**
   A track can now carry `offsetSec`: its OWN placement offset, in seconds,
   independent of the song. Audio placement is now the sum of three additive terms

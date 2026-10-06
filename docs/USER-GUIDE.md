@@ -401,7 +401,10 @@ first part is the one the game plays today.
 Mark up the song so practice tools and the highway know what's happening:
 
 - **Sections** (`Shift+M`) — Verse / Chorus / Solo boundaries.
-- **Phrases** (`Shift+P`) — finer practice spans.
+- **Phrases** (`Shift+P`) — finer practice spans. **Simplify** (`Alt+P`) authors
+  a lower difficulty tier for the phrase at the cursor — the editor derives the
+  easier chart (legato chains dropped, bend/slide/tap ornaments stripped, dense
+  chords thinned) that the in-game mastery slider serves.
 - **Anchors** (`Shift+F`) — hand-position anchors for fretted tracks; the
   fretboard strip and position resolver use them.
 - **Handshapes** (`Ctrl+H`) — chord shapes from the current selection.
@@ -459,6 +462,7 @@ you'll reach for constantly (FeedBack profile):
 | `T` | Tool palette (`T,T` = Tempo Map) | `W` | Show/hide waveform |
 | `Alt+B` | Loop A/B (audio ↔ guide) | `Shift+L` | Follow playhead |
 | `Shift+M` | Add section | `Shift+F` | Set anchor |
+| `Shift+P` | Add phrase | `Alt+P` | Simplify the phrase at the cursor |
 
 ---
 
