@@ -361,6 +361,7 @@ const GTR = (name = 'Lead') => ({ id: name.toLowerCase(), name, notes: [], chord
 
 function makeSwitcher() {
     let selectorSyncs = 0;
+    let menuClosures = 0, addNoteClosures = 0;
     const fn = extractWinFn('editorSwitcherSelect', {
         isDrumArrangement,
         S,
@@ -371,11 +372,18 @@ function makeSwitcher() {
         updateArrangementSelector: () => { selectorSyncs++; },
         draw: () => {},
         updateStatus: () => {},
-        hideContextMenu: () => {},
-        hideAddNote: () => {},
+        hideContextMenu: () => { menuClosures++; },
+        hideAddNote: () => { addNoteClosures++; },
         window: { editorSelectArrangement: (v) => { S.currentArr = parseInt(v) || 0; } },
     });
-    return { fn, counts: { get selectorSyncs() { return selectorSyncs; } } };
+    return {
+        fn,
+        counts: {
+            get selectorSyncs() { return selectorSyncs; },
+            get menuClosures() { return menuClosures; },
+            get addNoteClosures() { return addNoteClosures; },
+        },
+    };
 }
 
 t('switcher → Drums drops the engraved lens (draw checks tabViewMode first)', () => {
@@ -429,6 +437,93 @@ t('switcher → Drums resyncs the <select> even when the drums path is unavailab
     assert.strictEqual(counts.selectorSyncs, 1,
         'the dropdown is snapped back off the Drums option it optimistically showed');
     assert.strictEqual(S.drumEditMode, false, 'nothing switched');
+});
+
+// ── Stale note index in the context menu / add-note popover (issue #28) ──
+// A menu opened on the OUTGOING arrangement holds an idx into ITS notes()
+// array. If the switch happens via the <select> (outside the canvas), mouse.js's
+// click-based auto-close never fires, so the stale idx would carry into the
+// new arrangement's notes() and misapply an action there. Both switch paths
+// must close the menu and the add-note popover unconditionally.
+
+t('switcher closes the context menu and add-note popover on every switch path', () => {
+    // Drums path: returns before reaching editorSelectArrangement, so the
+    // closures must happen up front in editorSwitcherSelect itself.
+    Object.assign(S, {
+        arrangements: [GTR('Lead'), DRUMS()], currentArr: 0,
+        drumTab: { version: 1 }, format: 'sloppak',
+        tabViewMode: false, drumEditMode: false, drumSel: new Set(), sel: new Set(),
+    });
+    const { fn, counts } = makeSwitcher();
+    fn('1');   // Drums option
+    assert.strictEqual(counts.menuClosures, 1,
+        'the context menu is closed on the drums switch path');
+    assert.strictEqual(counts.addNoteClosures, 1,
+        'the add-note popover is closed on the drums switch path');
+});
+
+t('switcher closes the context menu and add-note popover on the pitched path', () => {
+    Object.assign(S, {
+        arrangements: [GTR('Lead'), GTR('Bass'), DRUMS()], currentArr: 0,
+        drumTab: { version: 1 }, format: 'sloppak',
+        tabViewMode: false, drumEditMode: false, drumSel: new Set(), sel: new Set(),
+    });
+    const { fn, counts } = makeSwitcher();
+    fn('1');   // Bass — a pitched part
+    assert.strictEqual(counts.menuClosures, 1,
+        'the context menu is closed on the pitched switch path');
+    assert.strictEqual(counts.addNoteClosures, 1,
+        'the add-note popover is closed on the pitched switch path');
+});
+
+t('editorSelectArrangement closes the context menu and add-note popover', () => {
+    // The pitched path delegates to editorSelectArrangement, which must ALSO
+    // close both (it is reached by undo replay and the Tracks row too). The
+    // body pulls in many module globals, so assert on the source text rather
+    // than re-evaluating it — the two calls must sit at the very top, ahead of
+    // the switch, so a stale idx can never survive into the new arrangement.
+    const marker = 'window.editorSelectArrangement = (val) => {';
+    const start = src.indexOf(marker);
+    assert.ok(start >= 0, 'window.editorSelectArrangement must exist');
+    const open = src.indexOf('{', start);
+    let depth = 0, end = -1;
+    for (let i = open; i < src.length; i++) {
+        if (src[i] === '{') depth++;
+        else if (src[i] === '}' && --depth === 0) { end = i; break; }
+    }
+    assert.ok(end > 0, 'unbalanced braces extracting editorSelectArrangement');
+    const body = src.slice(open, end + 1);   // the whole function body
+    const hideIdx = body.indexOf('hideContextMenu()');
+    const addIdx = body.indexOf('hideAddNote()');
+    assert.ok(hideIdx >= 0,
+        'hideContextMenu() is called in editorSelectArrangement');
+    assert.ok(addIdx >= 0,
+        'hideAddNote() is called in editorSelectArrangement');
+    // Both must precede the actual switch (S.currentArr = ...), so the menu is
+    // closed BEFORE the outgoing arrangement is left behind.
+    const switchIdx = body.indexOf('S.currentArr');
+    assert.ok(switchIdx > hideIdx && switchIdx > addIdx,
+        'the closures happen before the switch itself');
+});
+
+t('no stale idx survives the switch: a menu action cannot target the old arrangement', () => {
+    // The whole point of #28: an action captured while the menu was open on
+    // arrangement A holds A's idx. After switching to B (which has a
+    // DIFFERENT number of notes), that idx must no longer be reachable — the
+    // menu is gone, so no captured action can fire against B's notes().
+    // Prove it by counting: the switch path closes the menu, leaving zero
+    // open menus and zero captured actions to misapply.
+    Object.assign(S, {
+        arrangements: [GTR('Lead'), GTR('Bass'), DRUMS()], currentArr: 0,
+        drumTab: { version: 1 }, format: 'sloppak',
+        tabViewMode: false, drumEditMode: false, drumSel: new Set(), sel: new Set(),
+    });
+    const { fn, counts } = makeSwitcher();
+    fn('1');   // Bass
+    assert.strictEqual(counts.menuClosures, 1, 'the menu (and its captured idx) is closed');
+    assert.strictEqual(counts.addNoteClosures, 1,
+        'the add-note popover (and its captured idx) is closed');
+    assert.strictEqual(S.currentArr, 1, 'the switch itself still happened');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
