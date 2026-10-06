@@ -32,6 +32,25 @@ export function _editorEscHtml(s) {
         .replace(/'/g, '&#39;');
 }
 
+// Clamp a popover's top-left corner so the whole w×h box stays inside the
+// vw×vh viewport. The trigger coordinates (cx, cy) are the wanted corner, so
+// the box is pulled back inside at the right/bottom edges and never allowed to
+// go negative at the left/top. Shared by every popover that positions from raw
+// event coordinates — the note context menu, the section menu and the add-note
+// dialog — so the edge behaviour is one tested function instead of three copies
+// of the same Math.
+//
+// A box wider/taller than the viewport collapses to 0 rather than oscillating:
+// the left/top edges win, which is the only stable answer.
+/* @pure:popover-clamp:start */
+export function _editorClampPopoverPure(cx, cy, w, h, vw, vh) {
+    return {
+        x: Math.max(0, Math.min(cx, vw - w)),
+        y: Math.max(0, Math.min(cy, vh - h)),
+    };
+}
+/* @pure:popover-clamp:end */
+
 // Shared keyboard-handling for dynamically-generated modals: stop
 // propagation so global shortcuts can't fire, trap Tab/Shift-Tab so
 // focus doesn't escape, close on Escape. Returns the keydown listener

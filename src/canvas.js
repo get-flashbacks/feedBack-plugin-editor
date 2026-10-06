@@ -28,11 +28,22 @@ export let ctx = null;
  * object never matches again afterward. So each firing re-subscribes a fresh
  * query pinned to the new DPR, chaining forward through however many changes
  * happen across the session. Guarded for node/tests, where there is no
- * `window` (or no `matchMedia`). */
+ * `window` (or no `matchMedia`).
+ *
+ * Returns a dispose function that un-subscribes the pending query and stops
+ * the chain. The editor re-injects itself on a screen change, and a watcher
+ * left behind would keep re-firing into the PREVIOUS injection's resizeCanvas
+ * closure over a replaced DOM — the same leak the teardown already clears the
+ * ResizeObservers for. Callers must keep the handle and dispose on teardown;
+ * a no-window build gets a no-op dispose so the call site never branches. */
 export function _watchDpr(onChange) {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+        return () => {};
+    }
     let mq = window.matchMedia(`(resolution: ${DPR}dppx)`);
+    let stopped = false;
     const handler = () => {
+        if (stopped) return;
         const next = window.devicePixelRatio || 1;
         if (next !== DPR) {
             DPR = next;
@@ -42,6 +53,10 @@ export function _watchDpr(onChange) {
         mq.addEventListener('change', handler, { once: true });
     };
     mq.addEventListener('change', handler, { once: true });
+    return () => {
+        stopped = true;
+        try { mq.removeEventListener('change', handler); } catch (_) { /* already gone */ }
+    };
 }
 
 /** Adopt `el` as the render surface. Returns it, so a caller can bail on null.

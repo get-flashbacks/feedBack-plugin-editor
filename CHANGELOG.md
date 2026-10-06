@@ -176,6 +176,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The DPR watcher is disposed when the editor screen is torn down.** The
+  monitor-move / browser-zoom refresh (`matchMedia('(resolution: …)')`, the
+  improvement plan's P0.5) lives on `window`, outside the tracked listener
+  registry, and re-subscribes itself forever — so every re-injection of the
+  editor left one more watcher holding the PREVIOUS injection's `resizeCanvas`
+  closure, free to size a canvas the new injection already owns. `_watchDpr`
+  now returns a dispose function (a no-op where there is no `window`) and
+  `window.__editorScreenTeardown` calls it, next to the ResizeObserver
+  cleanups it already did. The popovers' viewport clamps (P0.4) and the DPR
+  refresh itself were already on `main` (both landed in #6, which is why
+  neither reproduces on a fresh checkout); what remained was this teardown and
+  the coverage the issue asked for — `tests/popover_clamp.test.mjs` pins the
+  shared clamp helper plus the call sites (including that size is measured
+  *after* the popover is un-hidden, since `display:none` reports 0×0), and
+  `tests/dpr_watch.test.mjs` pins the chain's re-subscription through repeated
+  DPR changes, the live `DPR` binding, and dispose. One more opener of that
+  same `#editor-context-menu` element — the section menu built in
+  `src/input.js` (right-click on the beat bar or empty grid) — was still
+  positioned raw at the trigger point and now clamps through the same helper.
+
 - **A pack's authored per-phrase difficulty tiers no longer collapse into one
   chart on save.** The editor authors a single flat note/chord/anchor list per
   arrangement, and saving rebuilt every `phrases[].levels[]` entry from that one

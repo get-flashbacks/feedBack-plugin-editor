@@ -881,6 +881,9 @@ let _editorScreenObs = null;
 // Handle for the pre-canvas boot poller (setInterval below) so the teardown
 // can stop a late-firing interval from re-running a torn-down injection.
 let _bootPollInterval = null;
+// Dispose for canvas.js's DPR watcher — the matchMedia chain outlives the
+// registry below (it lives on window), so the teardown must unhook it by hand.
+let _stopDprWatch = null;
 window.__editorScreenTeardown = () => {
     // Unblock any awaiting session-transition prompt before its listener is
     // swept below, so a re-injection can't strand guardSessionTransition.
@@ -903,6 +906,10 @@ window.__editorScreenTeardown = () => {
     try { if (_canvasWrapObs) { _canvasWrapObs.disconnect(); _canvasWrapObs = null; } } catch (_) {}
     // Stop the pre-canvas boot poller if it's still spinning.
     try { if (_bootPollInterval) { clearInterval(_bootPollInterval); _bootPollInterval = null; } } catch (_) {}
+    // Unhook the DPR watcher: its matchMedia query is pending on window, not
+    // tracked by _globalListeners, and the chain re-subscribes forever — left
+    // running it would resize a canvas the next injection already owns.
+    try { if (_stopDprWatch) { _stopDprWatch(); _stopDprWatch = null; } } catch (_) {}
     // Release the drum strip's MIDI monitor tap + device session (no-op if it
     // was never armed) so a re-injection can't leak the session or stack taps.
     try { teardownDrumPadStrip(); } catch (_) {}
@@ -2334,7 +2341,7 @@ function init() {
     // so the canvas kept rendering at the old pixel density. resizeCanvas()
     // reads the live DPR binding to re-derive canvas.width/height off the
     // new value.
-    _watchDpr(() => resizeCanvas());
+    _stopDprWatch = _watchDpr(() => resizeCanvas());
     // src/create.js's global 'input' listener. It used to be a top-level
     // statement in this file; a module must not have import-time side effects.
     initCreate();

@@ -26,7 +26,7 @@ import {
     BEND_INTENTS, _isSuggested, bendPresetCurve, notes, rescaleBendCurveToPeak, sanitizeBendCurve,
 } from './notes.js';
 import { S } from './state.js';
-import { _editorPromptText, _installModalKeyboard } from './ui.js';
+import { _editorClampPopoverPure, _editorPromptText, _installModalKeyboard } from './ui.js';
 
 // ════════════════════════════════════════════════════════════════════
 // Context menu
@@ -107,10 +107,10 @@ export function showContextMenu(cx, cy, idx) {
     menu.classList.remove('hidden');
     const menuW = menu.offsetWidth || 0;
     const menuH = menu.offsetHeight || 0;
-    const clampedX = Math.max(0, Math.min(cx, window.innerWidth - menuW));
-    const clampedY = Math.max(0, Math.min(cy, window.innerHeight - menuH));
-    menu.style.left = clampedX + 'px';
-    menu.style.top = clampedY + 'px';
+    const pos = _editorClampPopoverPure(cx, cy, menuW, menuH,
+        window.innerWidth, window.innerHeight);
+    menu.style.left = pos.x + 'px';
+    menu.style.top = pos.y + 'px';
 }
 export function hideContextMenu() {
     document.getElementById('editor-context-menu').classList.add('hidden');
