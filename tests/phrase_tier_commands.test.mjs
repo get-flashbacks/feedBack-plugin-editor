@@ -236,7 +236,9 @@ t('integration: window slice → plan → exec yields the two-rung ladder; undo/
 // re-sources the easiest tier's own content when the ladder is real), and the
 // descent stops at a difficulty-0 rung — the ladder-shape floor check answers
 // 'floor' BEFORE content is even read. A LONE top tier is the exception: it
-// sources the live chart (and re-emits from it), not its loaded copy.
+// sources the live chart (and re-emits from it). That switch isn't pinned
+// HERE — this harness builds its window from the tier's own notes, so it
+// plans identically either way; `tests/tier_simplify.test.mjs` owns it.
 t('cascade: an existing ladder grows a rung at minDifficulty-1; a difficulty-0 floor refuses', () => {
     const env = makeEnv();
     const ph = { name: 'phrase', number: 1, start_time: 0,
@@ -244,9 +246,10 @@ t('cascade: an existing ladder grows a rung at minDifficulty-1; a difficulty-0 f
     const from = windowForPhrase([ph], 0);
     const win = { notes: sliceByWindow(ph.tiers[0].notes, from.t0, from.t1), chords: [], anchors: [], handshapes: [] };
 
-    // First press on the mid-ladder phrase: the lone top tier sources the
-    // LIVE chart (the window, not its own loaded copy) and re-emits from it;
-    // the new rung lands one below the ladder floor.
+    // First press on the mid-ladder phrase: the new rung lands one below the
+    // ladder floor, and the top rung re-emits above it (here its window is
+    // sliced from the tier's own notes — see `tests/tier_simplify.test.mjs`
+    // for the lone tier actually sourcing the live chart).
     const plan = planTierSimplification(ph, win, { minSustain: null });
     assert.ok(!plan.error, 'harness: the mid-ladder phrase plans — ' + (plan.message || 'ok'));
     assert.strictEqual(plan.addedDifficulty, 1, 'the new rung lands one below the ladder floor');

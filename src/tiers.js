@@ -440,11 +440,14 @@ function _copyTier(t) {
 // The new rung's source content is the EASIEST existing tier's notes/chords —
 // except when the ladder holds a SINGLE tier. That lone tier is the TOP tier,
 // which the save path rebuilds from the editable flat chart on every save
-// (`_authored_phrase_levels` re-slices the max-difficulty rung from the flat
-// lists), so the tier's loaded copy goes stale the moment the user edits the
-// chart. Sourcing from the live window slice keeps the derived rung current
-// (and below, the lone tier re-emits above it with the window's chart content
-// for the same reason). With NO tiers at all the source is likewise the flat
+// (`_authored_phrase_levels` re-slices the max-difficulty rung's notes/chords/
+// anchors from the flat lists), so the tier's loaded copy goes stale the moment
+// the user edits the chart. Sourcing from the live window slice keeps the
+// derived rung current (and below, the lone tier re-emits above it from that
+// same window, for the same reason). Handshapes are the one field that does
+// NOT come back from the chart: `_authored_phrase_levels` reads them off the
+// tier, so the re-emit keeps the lone tier's own list and the next save writes
+// it back unchanged. With NO tiers at all the source is likewise the flat
 // chart slice. With no existing tiers the ladder is a fresh [0=simplified,
 // 1=full-chart-copy] pair (maxDifficulty 1, or the phrase's DECLARED wire
 // `max_difficulty` when larger); with a lone top tier the new rung lands at
@@ -471,8 +474,10 @@ export function planTierSimplification(phrase, window, opts) {
 
     // A lone tier is the top tier: source notes/chords from the live flat
     // chart, not the tier's loaded copy (see the planner docblock). Only the
-    // SOURCE comes from the window — the lone tier itself rides on (rebuilt
-    // from the same chart on save).
+    // SOURCE comes from the window — the lone tier rides on above the new rung
+    // with the window's chart content (save rebuilds its notes/chords/anchors
+    // from the chart anyway) and its own handshapes (save reads those off the
+    // tier, never off the chart).
     const fromTier = ladder.length > 0;   // an authored ladder exists…
     const easiestIsTop = fromTier && ladder.length === 1;   // …but a lone tier is the top tier…
     const easiest = fromTier && !easiestIsTop ? ladder[0].tier : null;   // …else the flat chart
@@ -496,8 +501,9 @@ export function planTierSimplification(phrase, window, opts) {
     // Anchors/handshapes for the NEW rung: the source tier's own lists when it
     // carries them (fall back to the window's otherwise), else the window's
     // own — handshapes normalized to the tier shape either way. A lone top
-    // tier has no source role, so its anchors/handshapes fall back to the
-    // window's here (same as the fresh ladder).
+    // tier has no source role, so the new rung takes the window's lists here
+    // (same as the fresh ladder); the lone tier's OWN handshapes still ride
+    // its re-emit below, since save reads them off the tier.
     const rawAnchors = (easiest !== null && Array.isArray(easiest.anchors))
         ? easiest.anchors
         : (Array.isArray(win.anchors) ? win.anchors : []);
@@ -535,12 +541,22 @@ export function planTierSimplification(phrase, window, opts) {
         // rung: [simplified below, full chart verbatim at (its) top]. The top
         // rung is the editable flat chart copy — the pair the save path will
         // slice/keep verbatim; the content is cloned so each tier owns it.
+        // Handshapes are the exception (save reads them off the tier), see
+        // `topHandshapes` below.
         // The new rung lands one below the ladder floor (0 for a fresh ladder,
         // min − 1 for a lone top tier at min > 0 — never a difficulty-0 floor
         // here, the floor guard answered first).
         const floorDifficulty = easiestIsTop ? ladder[0].difficulty : 1;
         const target = floorDifficulty - 1;   // ≥ 0: floor guard passed (fresh: 1−1)
         const maxDifficulty = Math.max(floorDifficulty, _declaredMaxDifficulty(p) || 0);
+        // Handshapes are the one field save does NOT rebuild from the chart
+        // (`_authored_phrase_levels` reads them off the tier), so the
+        // re-emitted top rung keeps the lone tier's own list — sourcing them
+        // from the window would rewrite what the next save persists. A fresh
+        // ladder has no tier, so it rides the window's.
+        const topHandshapes = (easiestIsTop && Array.isArray(ladder[0].tier.handshapes))
+            ? _normalizeHandshapes(ladder[0].tier.handshapes)
+            : handshapes.map(hs => structuredClone(hs));
         return {
             tiers: [
                 {
@@ -555,7 +571,7 @@ export function planTierSimplification(phrase, window, opts) {
                     notes: _clonedObjectMembers(win.notes),
                     chords: _clonedObjectMembers(win.chords),
                     anchors: _clonedObjectMembers(win.anchors),
-                    handshapes: handshapes.map(hs => structuredClone(hs)),
+                    handshapes: topHandshapes,
                 },
             ],
             maxDifficulty,

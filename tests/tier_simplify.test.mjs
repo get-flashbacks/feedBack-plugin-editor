@@ -347,7 +347,9 @@ test('planTierSimplification: a LONE top tier sources the live chart, not the ti
     // A single rung at difficulty N is the top tier — the editable flat chart
     // copy save rebuilds on write. If the user edited the chart after load,
     // the loaded tier copy is stale: the new rung must derive from the live
-    // window slice, and re-emit the top rung from it too.
+    // window slice, and re-emit the top rung from it too. Handshapes are the
+    // exception — save reads them off the tier, never off the chart, so the
+    // re-emit preserves the tier's own list.
     const stale = bendNote(0.0);   // the chart's bent note, edited away since
     const live = plainNote(0.0);
     const phrase = freshPhrase({
@@ -357,7 +359,7 @@ test('planTierSimplification: a LONE top tier sources the live chart, not the ti
             notes: [stale, chainNote(0.5)],
             chords: [],
             anchors: [],
-            handshapes: [],
+            handshapes: [handshape(1.5, 2.5, { chord_id: 1 })],
         }],
     });
     const win = {
@@ -375,10 +377,15 @@ test('planTierSimplification: a LONE top tier sources the live chart, not the ti
     assert.deepStrictEqual(res.tiers[0].notes.map(n => n.time), [0.0],
         'chain member still drops out of the new rung');
     // The re-emitted top rung is the live window copy, not the stale tier:
-    // no stale bend survives, and the window's anchors/handshapes ride it.
+    // no stale bend survives, and the window's anchors ride it.
     assert.deepStrictEqual(res.tiers[1].notes, win.notes);
     assert.deepStrictEqual(res.tiers[1].anchors, [anchor(0.25)]);
-    assert.deepStrictEqual(res.tiers[1].handshapes, [handshape(0.0, 2.0)]);
+    // ...except handshapes: `_authored_phrase_levels` re-slices only
+    // notes/chords/anchors from the chart and reads handshapes off the tier,
+    // so keeping the tier's own is what leaves the next save byte-identical.
+    assert.deepStrictEqual(res.tiers[1].handshapes, [handshape(1.5, 2.5, { chord_id: 1 })]);
+    // The NEW rung is fresh content and takes the window's handshapes.
+    assert.deepStrictEqual(res.tiers[0].handshapes, [handshape(0.0, 2.0)]);
 });
 
 test('planTierSimplification: tiers [1,3] → rung 0 derived from tier 1 itself', () => {
