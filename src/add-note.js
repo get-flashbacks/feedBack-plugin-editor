@@ -8,6 +8,7 @@ import { _tourNoteAction } from './tour.js';
 import { editorKeyNoteNames, isKeysMode, midiToNote, noteToMidi } from './keys.js';
 import { S } from './state.js';
 import { host } from './host.js';
+import { _clampPopoverPos } from './ui.js';
 
 export let addNoteData = null;
 
@@ -22,8 +23,9 @@ export function showAddNote(cx, cy, time, string, fret) {
     dlg.classList.remove('hidden');
     const dlgW = dlg.offsetWidth || 0;
     const dlgH = dlg.offsetHeight || 0;
-    dlg.style.left = Math.max(0, Math.min(cx, window.innerWidth - dlgW)) + 'px';
-    dlg.style.top = Math.max(0, Math.min(cy, window.innerHeight - dlgH)) + 'px';
+    const pos = _clampPopoverPos(cx, cy, dlgW, dlgH, window.innerWidth, window.innerHeight);
+    dlg.style.left = pos.x + 'px';
+    dlg.style.top = pos.y + 'px';
 
     document.getElementById('editor-add-fret-col').classList.toggle('hidden', isKeys);
     document.getElementById('editor-add-pitch-col').classList.toggle('hidden', !isKeys);
