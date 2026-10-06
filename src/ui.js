@@ -2,10 +2,9 @@
  *
  * The status line (called from ~180 sites), plus the three modal primitives
  * every dialog in the editor is built on: the focus trap, the in-app text
- * prompt, and the HTML escaper — and the viewport clamp the positioned
- * popovers (context menu, add-note dialog) share. They live here for the same
- * reason setStatus does — everything needs them, and none of them belongs to
- * whichever feature happened to want one first.
+ * prompt, and the HTML escaper. They live here for the same reason setStatus
+ * does — everything needs them, and none of them belongs to whichever feature
+ * happened to want one first.
  *
  * This module imports nothing, which is what lets any other module use it
  * without thinking about cycles. `_editorPromptText` used to reach the modules
@@ -33,17 +32,18 @@ export function _editorEscHtml(s) {
         .replace(/'/g, '&#39;');
 }
 
-/* @pure:popover-clamp:start */
-// Keep a positioned popover (the canvas context menu, the add-note dialog)
-// fully inside the viewport. `cx`/`cy` is where the trigger put it — usually
-// raw event clientX/clientY — `w`/`h` the popover's MEASURED size (read after
-// it has been unhidden, so offsetWidth/offsetHeight aren't the display:none
-// 0x0 fallback), and `vw`/`vh` the current window.innerWidth/innerHeight.
-// Returns the top-left corner to actually apply.
+// Clamp a popover's top-left corner so the whole w×h box stays inside the
+// vw×vh viewport. The trigger coordinates (cx, cy) are the wanted corner, so
+// the box is pulled back inside at the right/bottom edges and never allowed to
+// go negative at the left/top. Shared by every popover that positions from raw
+// event coordinates — the note context menu, the section menu and the add-note
+// dialog — so the edge behaviour is one tested function instead of three copies
+// of the same Math.
 //
-// A popover bigger than the viewport can't be kept fully visible; pinning it
-// at 0 leaves as much of it on screen as there is room for.
-export function _clampPopoverPos(cx, cy, w, h, vw, vh) {
+// A box wider/taller than the viewport collapses to 0 rather than oscillating:
+// the left/top edges win, which is the only stable answer.
+/* @pure:popover-clamp:start */
+export function _editorClampPopoverPure(cx, cy, w, h, vw, vh) {
     return {
         x: Math.max(0, Math.min(cx, vw - w)),
         y: Math.max(0, Math.min(cy, vh - h)),

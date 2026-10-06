@@ -1,173 +1,133 @@
 /*
- * DPR refresh on a monitor / zoom change (improvement plan P0.5, issue #30).
+ * The DPR refresh path (issue #30): canvas.js captured devicePixelRatio once
+ * at module load, and a monitor move / OS-zoom change fires NO window
+ * 'resize' — so nothing re-derived the canvas pixel size. _watchDpr() re-checks
+ * it through matchMedia('(resolution: Ndppx)') and hands the new value to the
+ * caller (main.js re-runs resizeCanvas, which sizes the backing store off the
+ * live DPR binding and redraws).
  *
- * canvas.js cached `DPR` once at module load, so dragging the window to a
- * monitor with a different scale factor — or an OS/browser zoom change — left
- * the canvas rendering at the old pixel density until a reload. `_watchDpr`
- * re-reads devicePixelRatio from a matchMedia '(resolution: Ndppx)' query and
- * chains a fresh query forward on every change (the same query object only
- * ever fires once).
+ * Two properties the implementation depends on:
+ *   - a single resolution query only ever fires ONCE (it stops matching as
+ *     soon as DPR moves), so each firing must re-subscribe a fresh query
+ *     pinned to the NEW DPR — otherwise the chain dies after one change;
+ *   - the chain must be disposable: the editor re-injects itself on a screen
+ *     change, and a watcher left pending on window would keep resizing a
+ *     canvas the next injection already owns.
  *
- * This pins the subscription chain, the DPR/onChange updates, and the dispose
- * handle the screen teardown (src/main.js `window.__editorScreenTeardown`)
- * must call so a re-injection can't stack a second watcher.
+ * Each case gets its own canvas.js instance (cache-busted import) with a
+ * hand-driven fake window, since `DPR` is module state that mutates.
  *
  * Run: node tests/dpr_watch.test.mjs
  */
 import assert from 'node:assert';
-import fs from 'node:fs';
-
-// A matchMedia stub whose queries remember their listeners, so a test can see
-// exactly which query is subscribed and fire it by hand — including the
-// once-only consumption the browser does for us.
-const mqs = [];
-globalThis.window = {
-    devicePixelRatio: 1,
-    matchMedia(query) {
-        const subs = [];
-        const mq = {
-            query,
-            addEventListener(type, fn, opts) { subs.push({ type, fn, opts }); },
-            removeEventListener(type, fn) {
-                const i = subs.findIndex(s => s.type === type && s.fn === fn);
-                if (i >= 0) subs.splice(i, 1);
-            },
-            fire() {
-                for (const s of [...subs]) {
-                    const once = s.opts && s.opts.once;
-                    if (once) subs.splice(subs.indexOf(s), 1);
-                    s.fn({ matches: true, media: query });
-                }
-            },
-            subs,
-        };
-        mqs.push(mq);
-        return mq;
-    },
-};
-
-// Namespace import: `DPR` is a live binding, so reading it through the
-// namespace (`canvasMod.DPR`) tracks the watcher's writes — destructuring
-// (`const { DPR } = await import(...)`) would snapshot the import-time value.
-const canvasMod = await import('../src/canvas.js');
-const { _watchDpr } = canvasMod;
 
 let pass = 0, fail = 0;
-function t(name, fn) {
-    try {
-        fn();
-        pass++;
-        console.log('ok - ' + name);
-    } catch (err) {
-        fail++;
-        console.error('not ok - ' + name);
-        console.error(err && err.stack || err);
-    }
+async function t(name, fn) {
+    try { await fn(); pass++; console.log('  ok   ' + name); }
+    catch (e) { fail++; console.error('  FAIL ' + name + ': ' + e.message); }
 }
 
-const changes = [];
-let stop = _watchDpr((d) => changes.push(d));
+// A fake window whose matchMedia records every query string and the listeners
+// handed to it, so the chain can be fired by hand.
+function fakeWindow(dpr) {
+    return {
+        devicePixelRatio: dpr,
+        queries: [],
+        matchMedia(q) {
+            const mq = {
+                query: q,
+                listeners: [],
+                addEventListener(type, fn, opts) { this.listeners.push({ type, fn, opts }); },
+                removeEventListener(type, fn) {
+                    this.listeners = this.listeners.filter((l) => l.fn !== fn);
+                },
+            };
+            this.queries.push(mq);
+            return mq;
+        },
+    };
+}
 
-t('the watcher subscribes once, at the CURRENT DPR, as a one-shot', () => {
-    assert.strictEqual(mqs.length, 1);
-    assert.strictEqual(mqs[0].query, '(resolution: 1dppx)');
-    assert.strictEqual(mqs[0].subs.length, 1);
-    assert.strictEqual(mqs[0].subs[0].type, 'change');
-    assert.strictEqual(mqs[0].subs[0].opts.once, true);
+let caseNo = 0;
+async function load(dpr) {
+    const win = fakeWindow(dpr);
+    globalThis.window = win;
+    const mod = await import(`../src/canvas.js?case=${caseNo++}`);
+    return { mod, win };
+}
+
+await t('subscribes one resolution query at the current DPR', async () => {
+    const { mod, win } = await load(1);
+    const stop = mod._watchDpr(() => {});
+    assert.strictEqual(win.queries.length, 1, 'one query subscribed');
+    assert.strictEqual(win.queries[0].query, '(resolution: 1dppx)', 'pinned to the current DPR');
+    assert.strictEqual(win.queries[0].listeners.length, 1);
+    assert.strictEqual(win.queries[0].listeners[0].type, 'change');
+    assert.deepStrictEqual(win.queries[0].listeners[0].opts, { once: true });
+    assert.strictEqual(typeof stop, 'function', 'a dispose handle comes back');
 });
 
-t('a DPR change re-reads devicePixelRatio, notifies, and re-subscribes', () => {
-    window.devicePixelRatio = 2;
-    mqs[0].fire();
-    assert.strictEqual(canvasMod.DPR, 2, 'the shared DPR binding must follow the monitor');
-    assert.deepStrictEqual(changes, [2], 'onChange fires exactly once, with the new DPR');
-    assert.strictEqual(mqs.length, 2, 'a fresh query chains forward');
-    assert.strictEqual(mqs[1].query, '(resolution: 2dppx)');
-    assert.strictEqual(mqs[1].subs.length, 1, 'the fresh query is armed');
-    assert.strictEqual(mqs[0].subs.length, 0, 'the spent query is consumed');
-});
-
-t('a change event with DPR unchanged does not re-notify (but stays armed)', () => {
-    mqs[1].fire();          // devicePixelRatio still 2
-    assert.deepStrictEqual(changes, [2], 'no duplicate onChange for a no-op change');
-    assert.strictEqual(mqs.length, 3, 'the chain still re-arms itself');
-    assert.strictEqual(mqs[2].query, '(resolution: 2dppx)');
-    assert.strictEqual(mqs[2].subs.length, 1);
-});
-
-t('dispose detaches the pending subscription', () => {
+await t('a DPR change calls onChange with the new value and re-subscribes pinned to it', async () => {
+    const { mod, win } = await load(1);
+    const seen = [];
+    const stop = mod._watchDpr((d) => seen.push(d));
+    win.devicePixelRatio = 2;
+    win.queries[0].listeners[0].fn();
+    assert.deepStrictEqual(seen, [2], 'onChange got the new DPR once');
+    assert.strictEqual(mod.DPR, 2, 'the exported live binding moved too');
+    assert.strictEqual(win.queries.length, 2, 'a fresh query was created');
+    assert.strictEqual(win.queries[1].query, '(resolution: 2dppx)', 'pinned to the NEW DPR');
+    assert.strictEqual(win.queries[1].listeners.length, 1, 'the chain re-subscribed');
     stop();
-    assert.strictEqual(mqs[2].subs.length, 0, 'the armed listener is gone');
 });
 
-t('after dispose a resolution change notifies nobody and arms nothing', () => {
-    const before = mqs.length;
-    window.devicePixelRatio = 3;
-    mqs[2].fire();
-    assert.deepStrictEqual(changes, [2], 'the disposed watcher stayed silent');
-    assert.strictEqual(mqs.length, before, 'no replacement query was created');
-    stop = null;
-    window.devicePixelRatio = 1;   // restore for the guard below
+await t('the chain keeps re-subscribing through several changes', async () => {
+    const { mod, win } = await load(2);
+    const seen = [];
+    mod._watchDpr((d) => seen.push(d));
+    win.devicePixelRatio = 1.5;
+    win.queries[0].listeners[0].fn();
+    win.devicePixelRatio = 3;
+    win.queries[1].listeners[0].fn();
+    assert.deepStrictEqual(seen, [1.5, 3]);
+    assert.strictEqual(win.queries.length, 3);
+    assert.strictEqual(win.queries[2].query, '(resolution: 3dppx)');
 });
 
-t('no window / no matchMedia: _watchDpr arms nothing and still returns a dispose stub', () => {
-    const saved = window.matchMedia;
-    window.matchMedia = undefined;
+await t('a change event with no actual DPR move fires nothing but keeps the chain alive', async () => {
+    const { mod, win } = await load(2);
+    const seen = [];
+    mod._watchDpr((d) => seen.push(d));
+    win.queries[0].listeners[0].fn();   // devicePixelRatio is still 2
+    assert.deepStrictEqual(seen, [], 'no onChange when the value did not move');
+    assert.strictEqual(win.queries.length, 2, 're-subscribed anyway');
+    assert.strictEqual(win.queries[1].query, '(resolution: 2dppx)');
+});
+
+await t('dispose unhooks the pending query and the chain stops dead', async () => {
+    const { mod, win } = await load(1);
+    const seen = [];
+    const stop = mod._watchDpr((d) => seen.push(d));
+    const pending = win.queries[0].listeners[0].fn;
+    stop();
+    assert.strictEqual(win.queries[0].listeners.length, 0, 'pending query unhooked');
+    win.devicePixelRatio = 3;
+    pending();   // an event already queued on the old handler must be inert
+    assert.deepStrictEqual(seen, [], 'no onChange after dispose');
+    assert.strictEqual(win.queries.length, 1, 'no re-subscription after dispose');
+});
+
+await t('a window-less build gets a no-op dispose it can always call', async () => {
+    const saved = globalThis.window;
+    delete globalThis.window;
     try {
-        const dispose = _watchDpr(() => { throw new Error('must not fire'); });
-        assert.strictEqual(typeof dispose, 'function');
-        assert.doesNotThrow(() => dispose());
+        const mod = await import(`../src/canvas.js?nowin=${caseNo++}`);
+        const stop = mod._watchDpr(() => { throw new Error('onChange must not fire'); });
+        assert.strictEqual(typeof stop, 'function');
+        assert.doesNotThrow(() => stop());
     } finally {
-        window.matchMedia = saved;
+        globalThis.window = saved;
     }
-});
-
-// ── The teardown wiring in src/main.js ─────────────────────────────
-const mainSrc = fs.readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
-
-function extractWinFn(name, globals) {
-    const marker = 'window.' + name + ' = ';
-    const start = mainSrc.indexOf(marker);
-    assert.ok(start >= 0, `window.${name} must exist`);
-    const open = mainSrc.indexOf('{', mainSrc.indexOf('=>', start));
-    let depth = 0, end = -1;
-    for (let i = open; i < mainSrc.length; i++) {
-        if (mainSrc[i] === '{') depth++;
-        else if (mainSrc[i] === '}' && --depth === 0) { end = i; break; }
-    }
-    assert.ok(end > 0, `unbalanced braces extracting ${name}`);
-    const arrowSrc = mainSrc.slice(start + marker.length, end + 1); // "() => {...}"
-    const names = Object.keys(globals);
-    const fn = new Function(...names, '"use strict"; return (' + arrowSrc + ');');
-    return fn(...names.map(k => globals[k]));
-}
-
-t('init hands _watchDpr a handler and keeps its dispose handle', () => {
-    assert.ok(
-        /_watchDprDispose = _watchDpr\(/.test(mainSrc),
-        'main.js must retain _watchDpr\'s dispose handle for teardown',
-    );
-});
-
-t('the screen teardown releases the DPR watcher', () => {
-    const calls = { dispose: 0 };
-    const obs = { disconnect() {} };
-    const teardown = extractWinFn('__editorScreenTeardown', {
-        dismissSessionPrompt() {},
-        _globalListeners: { removeAll() {} },
-        teardownAudio() {},
-        teardownTabView: undefined,          // typeof-guarded optional hook
-        _editorScreenObs: obs,
-        _v3TopbarWatch: null,
-        _v3LayoutObs: null,
-        _canvasWrapObs: obs,
-        _watchDprDispose: () => { calls.dispose++; },
-        _bootPollInterval: null,
-        teardownDrumPadStrip() {},
-        _cancelPendingDraw: undefined,       // typeof-guarded optional hook
-    });
-    teardown();
-    assert.strictEqual(calls.dispose, 1, 'teardown must call the dispose handle');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

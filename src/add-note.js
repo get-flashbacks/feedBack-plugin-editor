@@ -8,7 +8,7 @@ import { _tourNoteAction } from './tour.js';
 import { editorKeyNoteNames, isKeysMode, midiToNote, noteToMidi } from './keys.js';
 import { S } from './state.js';
 import { host } from './host.js';
-import { _clampPopoverPos } from './ui.js';
+import { _editorClampPopoverPure } from './ui.js';
 
 export let addNoteData = null;
 
@@ -23,7 +23,8 @@ export function showAddNote(cx, cy, time, string, fret) {
     dlg.classList.remove('hidden');
     const dlgW = dlg.offsetWidth || 0;
     const dlgH = dlg.offsetHeight || 0;
-    const pos = _clampPopoverPos(cx, cy, dlgW, dlgH, window.innerWidth, window.innerHeight);
+    const pos = _editorClampPopoverPure(cx, cy, dlgW, dlgH,
+        window.innerWidth, window.innerHeight);
     dlg.style.left = pos.x + 'px';
     dlg.style.top = pos.y + 'px';
 

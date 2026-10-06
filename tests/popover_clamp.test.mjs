@@ -1,178 +1,191 @@
 /*
- * Popover viewport clamping (improvement plan P0.4, issue #30).
+ * Viewport clamping for the two popovers positioned from raw event
+ * coordinates (issue #30): the canvas context menu (right-click) and the
+ * add-note dialog (double-click). Both used to be placed straight at the
+ * trigger point, so one near the bottom/right edge ran partly — sometimes
+ * wholly — off screen.
  *
- * The context menu and the add-note dialog are positioned straight from event
- * coordinates, so a right-click / double-click near an edge ran them off
- * screen. _clampPopoverPos (src/ui.js, @pure:popover-clamp) is the shared
- * math; the second half of this suite drives the REAL showContextMenu and
- * showAddNote against a stubbed DOM to pin that both call sites apply it —
- * measured size, viewport edges and all.
+ * Part 1 drives the shared pure helper (_editorClampPopoverPure, src/ui.js).
+ * Part 2 drives the REAL showContextMenu / showAddNote against a stub DOM,
+ * because the call sites carry two behaviours the math alone doesn't pin:
+ * the size must be measured AFTER `hidden` is removed (a display:none
+ * element reports 0×0 and would clamp to nonsense), and the live
+ * window.innerWidth/Height must be what feeds the helper.
  *
  * Run: node tests/popover_clamp.test.mjs
  */
 import assert from 'node:assert';
-
-const VW = 800, VH = 600;
-
-globalThis.window = {
-    innerWidth: VW,
-    innerHeight: VH,
-    devicePixelRatio: 1,
-    addEventListener() {},
-    localStorage: { getItem() { return null; }, setItem() {} },
-};
-
-// One element per id, materialized only for the properties the code under test
-// writes/reads. Unknown ids stay null so a missing dependency fails loudly.
-const els = new Map();
-function fakeEl(id, { w = 0, h = 0 } = {}) {
-    const el = {
-        id,
-        offsetWidth: w,
-        offsetHeight: h,
-        innerHTML: '',
-        style: {},
-        textContent: '',
-        value: '',
-        onclick: null,
-        classList: {
-            _set: new Set(),
-            add(c) { this._set.add(c); },
-            remove(c) { this._set.delete(c); },
-            toggle(c, force) {
-                if (force === undefined ? !this._set.has(c) : force) this._set.add(c);
-                else this._set.delete(c);
-            },
-            contains(c) { return this._set.has(c); },
-        },
-        querySelectorAll: () => [],
-        focus() {},
-        select() {},
-    };
-    els.set(id, el);
-    return el;
-}
-globalThis.document = { getElementById: (id) => els.get(id) || null };
+import fs from 'node:fs';
 
 let pass = 0, fail = 0;
 function t(name, fn) {
-    try {
-        fn();
-        pass++;
-        console.log('ok - ' + name);
-    } catch (err) {
-        fail++;
-        console.error('not ok - ' + name);
-        console.error(err && err.stack || err);
-    }
+    try { fn(); pass++; console.log('  ok   ' + name); }
+    catch (e) { fail++; console.error('  FAIL ' + name + ': ' + e.message); }
 }
 
-const { _clampPopoverPos } = await import('../src/ui.js');
+const VW = 1024, VH = 768;
 
-// ── The pure math ──────────────────────────────────────────────────
-t('a popover well inside the viewport is left alone', () => {
-    assert.deepStrictEqual(_clampPopoverPos(100, 100, 180, 320, VW, VH),
-        { x: 100, y: 100 });
+// ── Part 1: the pure clamp math ─────────────────────────────────────────────
+
+const { _editorClampPopoverPure } = await import('../src/ui.js');
+
+t('a comfortable position passes through untouched', () => {
+    assert.deepStrictEqual(
+        _editorClampPopoverPure(100, 120, 200, 300, VW, VH),
+        { x: 100, y: 120 });
 });
 
-t('near the right/bottom edge it is pulled back inside', () => {
-    assert.deepStrictEqual(_clampPopoverPos(VW - 10, VH - 10, 180, 320, VW, VH),
-        { x: VW - 180, y: VH - 320 });
+t('the right edge pulls the box back inside', () => {
+    const p = _editorClampPopoverPure(VW - 10, 120, 200, 300, VW, VH);
+    assert.strictEqual(p.x, VW - 200, 'anchored to the edge, not the trigger');
+    assert.strictEqual(p.x + 200, VW, 'the box ends exactly at the viewport edge');
 });
 
-t('past the right/bottom edge it never overspans', () => {
-    assert.deepStrictEqual(_clampPopoverPos(VW + 500, VH + 500, 180, 320, VW, VH),
-        { x: VW - 180, y: VH - 320 });
+t('the bottom edge pulls the box back inside', () => {
+    const p = _editorClampPopoverPure(100, VH - 10, 200, 300, VW, VH);
+    assert.strictEqual(p.y, VH - 300, 'anchored to the edge, not the trigger');
+    assert.strictEqual(p.y + 300, VH, 'the box ends exactly at the viewport edge');
 });
 
-t('above/left of the origin it stops at 0', () => {
-    assert.deepStrictEqual(_clampPopoverPos(-40, -40, 180, 320, VW, VH),
+t('a trigger point outside the left/top edge clamps to 0, never negative', () => {
+    assert.deepStrictEqual(
+        _editorClampPopoverPure(-40, -5, 200, 300, VW, VH),
         { x: 0, y: 0 });
 });
 
-t('a popover exactly as wide as the viewport lands at 0, not negative', () => {
-    assert.deepStrictEqual(_clampPopoverPos(50, 50, VW, VH, VW, VH), { x: 0, y: 0 });
+t('coordinates that exactly fit the edge are left alone', () => {
+    assert.deepStrictEqual(
+        _editorClampPopoverPure(VW - 200, VH - 300, 200, 300, VW, VH),
+        { x: VW - 200, y: VH - 300 });
 });
 
-t('a popover BIGGER than the viewport pins at 0 (as much visible as fits)', () => {
-    assert.deepStrictEqual(_clampPopoverPos(50, 50, VW + 200, VH + 200, VW, VH),
+t('a box bigger than the viewport collapses to 0 (the only stable answer)', () => {
+    assert.deepStrictEqual(
+        _editorClampPopoverPure(500, 500, VW + 100, VH + 100, VW, VH),
         { x: 0, y: 0 });
 });
 
-t('the exact far corner is not nudged off by rounding', () => {
-    assert.deepStrictEqual(_clampPopoverPos(VW - 180, VH - 320, 180, 320, VW, VH),
-        { x: VW - 180, y: VH - 320 });
-});
+// ── Part 2: the call sites ──────────────────────────────────────────────────
 
-// ── The real call sites ────────────────────────────────────────────
-const { showContextMenu } = await import('../src/context-menu.js');
+// A popover element whose offsetWidth/offsetHeight are only meaningful once
+// `hidden` is gone — the getter flags a measurement taken while hidden so the
+// tests can pin the un-hide-before-measure order.
+function fakePopover(w, h) {
+    const cls = new Set(['hidden']);
+    const state = { measuredHidden: false };
+    const flag = () => { if (cls.has('hidden')) state.measuredHidden = true; };
+    return {
+        state,
+        classList: {
+            add: (c) => { cls.add(c); },
+            remove: (c) => { cls.delete(c); },
+            contains: (c) => cls.has(c),
+            toggle: () => {},
+        },
+        style: {},
+        get offsetWidth() { flag(); return w; },
+        get offsetHeight() { flag(); return h; },
+        innerHTML: '',
+        querySelectorAll: () => ({ forEach: () => {} }),
+        appendChild() {},
+        value: '0',
+        focus() {},
+        select() {},
+    };
+}
+
+const menuEl = fakePopover(220, 340);
+const dlgEl = fakePopover(240, 160);
+const els = {
+    'editor-context-menu': menuEl,
+    'editor-add-note-dialog': dlgEl,
+    'editor-add-fret-col': fakePopover(0, 0),
+    'editor-add-pitch-col': fakePopover(0, 0),
+    'editor-add-fret': fakePopover(0, 0),
+    'editor-add-sustain': fakePopover(0, 0),
+};
+globalThis.document = {
+    getElementById: (id) => els[id] || null,
+    createElement: (tag) => ({ tag, className: '', dataset: {}, textContent: '' }),
+    addEventListener: () => {},
+    activeElement: null,
+};
+globalThis.localStorage = globalThis.localStorage || { getItem: () => null, setItem: () => {} };
+globalThis.window = { innerWidth: VW, innerHeight: VH };
+
 const { showAddNote } = await import('../src/add-note.js');
+const { showContextMenu } = await import('../src/context-menu.js');
 const { S } = await import('../src/state.js');
 
-function inViewport(left, top, w, h) {
-    const x = parseFloat(left), y = parseFloat(top);
-    assert.ok(Number.isFinite(x) && Number.isFinite(y), `non-numeric position ${left},${top}`);
-    assert.ok(x >= 0 && x + w <= VW + 1e-9, `horizontal escape: x=${x} w=${w}`);
-    assert.ok(y >= 0 && y + h <= VH + 1e-9, `vertical escape: y=${y} h=${h}`);
-    return { x, y };
+t('add-note: opened at the bottom-right corner the dialog stays fully on screen', () => {
+    showAddNote(VW - 6, VH - 6, 1, 2, 3);
+    assert.strictEqual(dlgEl.style.left, (VW - 240) + 'px');
+    assert.strictEqual(dlgEl.style.top, (VH - 160) + 'px');
+    assert.strictEqual(dlgEl.state.measuredHidden, false,
+        'size must be measured after `hidden` is removed');
+});
+
+t('add-note: near the top-left the trigger point is kept as-is', () => {
+    showAddNote(8, 12, 1, 2, 3);
+    assert.strictEqual(dlgEl.style.left, '8px');
+    assert.strictEqual(dlgEl.style.top, '12px');
+});
+
+Object.assign(S, {
+    arrangements: [{
+        name: 'Lead',
+        notes: [{ time: 1, string: 2, fret: 3, sustain: 0, techniques: {} }],
+        chords: [],
+    }],
+    currentArr: 0,
+});
+
+t('context menu: opened at the bottom-right corner it stays fully on screen', () => {
+    showContextMenu(VW - 4, VH - 4, 0);
+    assert.strictEqual(menuEl.style.left, (VW - 220) + 'px');
+    assert.strictEqual(menuEl.style.top, (VH - 340) + 'px');
+    assert.strictEqual(menuEl.state.measuredHidden, false,
+        'size must be measured after `hidden` is removed');
+});
+
+t('context menu: a mid-screen right-click is positioned at the cursor', () => {
+    showContextMenu(400, 300, 0);
+    assert.strictEqual(menuEl.style.left, '400px');
+    assert.strictEqual(menuEl.style.top, '300px');
+});
+
+// The section menu (right-click on the beat bar / empty grid) renders into
+// the SAME #editor-context-menu element from src/input.js, so it is the same
+// acceptance criterion as showContextMenu. It is module-private — extract it
+// by brace-matching (the extractFn convention used across tests/) and drive it
+// with the stub DOM above.
+function extractFn(source, name) {
+    const start = source.indexOf(`function ${name}(`);
+    assert.ok(start >= 0, `${name} not found in source`);
+    const open = source.indexOf('{', start);
+    let depth = 0;
+    for (let i = open; i < source.length; i++) {
+        if (source[i] === '{') depth++;
+        else if (source[i] === '}') {
+            depth--;
+            if (depth === 0) return source.slice(start, i + 1);
+        }
+    }
+    throw new Error(`unbalanced braces in ${name}`);
 }
 
-function seedFrettedChart() {
-    S.arrangements = [{ name: 'Gtr 1', notes: [
-        { time: 1, string: 0, fret: 3, sustain: 0.5, techniques: {} },
-    ], chords: [] }];
-    S.currentArr = 0;
-    S.sel = new Set();
-}
+const inputSrc = fs.readFileSync(new URL('../src/input.js', import.meta.url), 'utf8');
+const showSectionMenu = new Function(
+    'document', 'window', 'S', '_sectionNearestIndexPure', '_editorClampPopoverPure',
+    extractFn(inputSrc, 'showSectionMenu') + '\nreturn showSectionMenu;',
+)(document, globalThis.window, S, () => -1, _editorClampPopoverPure);
 
-const MENU_W = 180, MENU_H = 320;
-const DIALOG_W = 240, DIALOG_H = 140;
-
-t('the context menu opened past the right/bottom edge stays fully on screen', () => {
-    seedFrettedChart();
-    fakeEl('editor-context-menu', { w: MENU_W, h: MENU_H });
-    showContextMenu(VW + 40, VH + 40, 0);
-    const menu = els.get('editor-context-menu');
-    assert.deepStrictEqual(inViewport(menu.style.left, menu.style.top, MENU_W, MENU_H),
-        { x: VW - MENU_W, y: VH - MENU_H });
-});
-
-t('the context menu opened above/left of the origin stays fully on screen', () => {
-    seedFrettedChart();
-    fakeEl('editor-context-menu', { w: MENU_W, h: MENU_H });
-    showContextMenu(-30, -30, 0);
-    const menu = els.get('editor-context-menu');
-    assert.deepStrictEqual(inViewport(menu.style.left, menu.style.top, MENU_W, MENU_H),
-        { x: 0, y: 0 });
-});
-
-t('a context menu in the middle of the viewport keeps its click point', () => {
-    seedFrettedChart();
-    fakeEl('editor-context-menu', { w: MENU_W, h: MENU_H });
-    showContextMenu(300, 200, 0);
-    const menu = els.get('editor-context-menu');
-    assert.strictEqual(menu.style.left, '300px');
-    assert.strictEqual(menu.style.top, '200px');
-});
-
-t('the add-note dialog opened past the right/bottom edge stays fully on screen', () => {
-    fakeEl('editor-add-note-dialog', { w: DIALOG_W, h: DIALOG_H });
-    fakeEl('editor-add-fret-col');
-    fakeEl('editor-add-pitch-col');
-    fakeEl('editor-add-fret');
-    fakeEl('editor-add-sustain');
-    showAddNote(VW + 20, VH + 20, 1, 0, 3);
-    const dlg = els.get('editor-add-note-dialog');
-    assert.deepStrictEqual(inViewport(dlg.style.left, dlg.style.top, DIALOG_W, DIALOG_H),
-        { x: VW - DIALOG_W, y: VH - DIALOG_H });
-});
-
-t('the add-note dialog opened above/left of the origin stays fully on screen', () => {
-    fakeEl('editor-add-note-dialog', { w: DIALOG_W, h: DIALOG_H });
-    showAddNote(-10, -10, 1, 0, 3);
-    const dlg = els.get('editor-add-note-dialog');
-    assert.deepStrictEqual(inViewport(dlg.style.left, dlg.style.top, DIALOG_W, DIALOG_H),
-        { x: 0, y: 0 });
+t('section menu (same element): opened at the bottom-right corner it stays on screen', () => {
+    showSectionMenu(VW - 4, VH - 4, 0);
+    assert.strictEqual(menuEl.style.left, (VW - 220) + 'px');
+    assert.strictEqual(menuEl.style.top, (VH - 340) + 'px');
+    assert.strictEqual(menuEl.state.measuredHidden, false,
+        'size must be measured after `hidden` is removed');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

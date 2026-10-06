@@ -109,12 +109,16 @@ t('re-boot simulation: two registries never double-register', () => {
 
 // ── Published teardown body: real cleanup steps beyond the registry ──
 // The window.__editorScreenTeardown closure lives outside the @pure block and
-// closes over module globals. Extract its body and drive it with injected
-// fakes so we can assert the ResizeObserver disconnect and the boot-poll
-// clearInterval actually happen.
+// closes over module globals. The dispose logic itself lives in the helpers it
+// calls (_teardownScreenSoft / Observers / Handles) — extract all four bodies
+// and drive them with injected fakes so we can assert the ResizeObserver
+// disconnect and the boot-poll clearInterval actually happen.
 const tm = src.match(/window\.__editorScreenTeardown = \(\) => \{([\s\S]*?)\n\};/);
-if (!tm) {
-    console.error('FAIL: window.__editorScreenTeardown closure not found in src/main.js');
+const sm = src.match(/function _teardownScreenSoft\(\) \{([\s\S]*?)\n\}/);
+const om = src.match(/function _teardownScreenObservers\(\) \{([\s\S]*?)\n\}/);
+const hm = src.match(/function _teardownScreenHandles\(\) \{([\s\S]*?)\n\}/);
+if (!tm || !sm || !om || !hm) {
+    console.error('FAIL: teardown closure or helper bodies not found in src/main.js');
     process.exit(1);
 }
 function runTeardown(over) {
@@ -126,6 +130,7 @@ function runTeardown(over) {
         _v3TopbarWatch: null,
         _v3LayoutObs: null,
         _bootPollInterval: null,
+        _stopDprWatch: null,
         clearInterval: (id) => { cleared.push(id); },
         // playback + rAF teardown moved to src/audio.js; the closure delegates to
         // it now. Its own effects are covered by the audio suite.
@@ -133,12 +138,17 @@ function runTeardown(over) {
     }, over);
     const fn = new Function(
         '_globalListeners', 'S', '_editorScreenObs', '_v3TopbarWatch',
-        '_v3LayoutObs', '_bootPollInterval', 'clearInterval', 'teardownAudio',
-        tm[1] + '\nreturn { _v3LayoutObs, _bootPollInterval };'
+        '_v3LayoutObs', '_bootPollInterval', '_stopDprWatch', 'clearInterval', 'teardownAudio',
+        // Real helper bodies from main.js, so the teardown's calls resolve and
+        // the dispose logic still runs against the injected handles above.
+        'function _teardownScreenSoft() {' + sm[1] + '}' +
+        'function _teardownScreenObservers() {' + om[1] + '}' +
+        'function _teardownScreenHandles() {' + hm[1] + '}' +
+        tm[1] + '\nreturn { _v3LayoutObs, _bootPollInterval, _stopDprWatch };'
     );
     const out = fn(state._globalListeners, state.S, state._editorScreenObs,
         state._v3TopbarWatch, state._v3LayoutObs, state._bootPollInterval,
-        state.clearInterval, state.teardownAudio);
+        state._stopDprWatch, state.clearInterval, state.teardownAudio);
     return { out, cleared };
 }
 
@@ -159,6 +169,28 @@ t('teardown clears the pre-canvas boot poll interval and nulls the handle', () =
 t('teardown is a no-op on the optional #98 draw-cancel hook when absent', () => {
     // _cancelPendingDraw is undeclared here → typeof guard must not throw.
     assert.doesNotThrow(() => runTeardown({}));
+});
+
+t('teardown disposes the DPR watcher and nulls the handle', () => {
+    // canvas.js's matchMedia chain lives on window, outside _globalListeners,
+    // and re-subscribes forever — left pending it would resize the NEXT
+    // injection's canvas (issue #30).
+    let disposed = 0;
+    const { out } = runTeardown({ _stopDprWatch: () => { disposed++; } });
+    assert.strictEqual(disposed, 1, 'watcher disposed exactly once');
+    assert.strictEqual(out._stopDprWatch, null, 'handle cleared for the next boot');
+});
+
+t('teardown tolerates an injection that never armed a DPR watcher', () => {
+    assert.doesNotThrow(() => runTeardown({ _stopDprWatch: null }));
+});
+
+t('init() arms the DPR watcher into the handle the teardown disposes', () => {
+    // The teardown cases above inject their own fake handle, so nothing else
+    // would catch the wiring at the other end: drop the assignment in init()
+    // and _stopDprWatch stays null forever while every other test still passes.
+    assert.ok(src.includes('_stopDprWatch = _watchDpr('),
+        'main.js must capture _watchDpr()\'s dispose handle for teardown to call');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

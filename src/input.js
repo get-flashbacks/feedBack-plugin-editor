@@ -40,7 +40,7 @@ import { editorExportGp5 } from './gp5-export.js';
 import { TempoGridCmd, _editorModulateTempoAtSelection, _editorTapTempoAtSelection, _editorToggleSyncLock, _editorToggleTempoMapMode, _tapTempoHandleKey, _tempoDeleteSelection, _tempoInsertSyncPoint, _tempoMapOnContextMenu, _tempoMeasureBeatCount, _tempoMeasureDenominator, _tempoPromptMeasureBpm, _tempoSetBeatsPerMeasure, _tempoSetDenominatorOnBeatsPure, _tempoPromptPickup, _tempoSelRangePure, editorAcceptWholeTempoFit } from './tempo.js';
 import { _tourNoteAction } from './tour.js';
 import { _signpostNote } from './signposts.js';
-import { _editorPromptText, setStatus } from './ui.js';
+import { _editorClampPopoverPure, _editorPromptText, setStatus } from './ui.js';
 import { host } from './host.js';
 
 export let editorWaveformVisible = true;
@@ -1592,9 +1592,17 @@ function showSectionMenu(cx, cy, time) {
             }
         };
     });
-    menu.style.left = cx + 'px';
-    menu.style.top = cy + 'px';
+    // Same viewport clamp as showContextMenu (issue #30): this renders into
+    // the SAME #editor-context-menu element and used to be positioned raw at
+    // the trigger point. Un-hide first so offsetWidth/offsetHeight are the
+    // real rendered size instead of the display:none 0×0 fallback.
     menu.classList.remove('hidden');
+    const menuW = menu.offsetWidth || 0;
+    const menuH = menu.offsetHeight || 0;
+    const pos = _editorClampPopoverPure(cx, cy, menuW, menuH,
+        window.innerWidth, window.innerHeight);
+    menu.style.left = pos.x + 'px';
+    menu.style.top = pos.y + 'px';
 }
 
 export function _editorSelectAllPolicyPure(e) {
