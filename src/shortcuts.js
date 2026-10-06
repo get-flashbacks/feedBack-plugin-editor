@@ -152,6 +152,7 @@ const EDITOR_SHORTCUT_COMMANDS = Object.freeze([
     { id: 'resnapSelection', label: 'Resnap selection to grid', group: 'Grid and sustain', status: 'ready', keys: { feedback: 'Shift+R', logical: 'Q', cableton: 'Ctrl+U', eof: 'Shift+R' } },
     { id: 'addSection', label: 'Add section at cursor', group: 'Structure', status: 'ready', keys: { feedback: 'Shift+M', logical: "Alt+'", eof: 'Shift+S' } },
     { id: 'addPhrase', label: 'Add phrase at cursor', group: 'Structure', status: 'ready', keys: { feedback: 'Shift+P', eof: 'Shift+P' } },
+    { id: 'simplifyPhrase', label: 'Simplify phrase at cursor (author a lower difficulty tier)', group: 'Structure', status: 'ready', keys: { feedback: 'Alt+P', eof: 'Alt+P' } },
     { id: 'addToneChange', label: 'Add tone change at cursor', group: 'Structure', status: 'ready', keys: { feedback: 'Ctrl+Shift+T', eof: 'Ctrl+Shift+T' } },
     { id: 'addHandshape', label: 'Add handshape from selection', group: 'Structure', status: 'ready', keys: { feedback: 'Ctrl+H', eof: 'Ctrl+Shift+H' } },
     { id: 'toggleTempoMap', label: 'Enter/exit Tempo Map', group: 'Tempo map', status: 'ready', keys: { feedback: 'T,T', logical: 'G', eof: 'T (Tempo Map)' } },
@@ -322,6 +323,7 @@ export function _editorEofCommandForKeyPure(e, mode) {
     if (shift && key === 'i') return 'setTimeSignature';
     if (shift && key === 'n') return 'toggleLinkNext';
     if (shift && key === 'p') return 'addPhrase';
+    if (alt && key === 'p') return 'simplifyPhrase';
     if (shift && key === 'r') return 'resnapSelection';
     if (shift && key === 's') return 'addSection';
     if (shift && key === 't') return 'midiTones';
@@ -612,6 +614,7 @@ export function _editorFeedbackCommandForKeyPure(e, mode) {
     if (shift && key === 'r') return 'resnapSelection';
     if (shift && key === 'm') return 'addSection';
     if (shift && key === 'p') return 'addPhrase';
+    if (alt && key === 'p') return 'simplifyPhrase';
     if (ctrl && e.key === 'ArrowUp') return 'slideUp';
     if (ctrl && e.key === 'ArrowDown') return 'slideDown';
     // Bookmarks match on e.code — with Shift held, e.key for the digit row

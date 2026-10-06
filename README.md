@@ -134,8 +134,9 @@ The frontend is ~50 ES modules under `src/`, orchestrated by a thin
   only per-tier data on disk, and `_repopulate_phrase_levels` writes one from the
   other — lower tiers verbatim, the top tier re-sliced from the flat chart (the
   top tier *is* the phrase's full chart per core, and the only copy the UI can
-  edit). So a chart edit reaches the top tier only; a lower tier's notes stay as
-  authored until it is itself edited.
+  edit). So a chart edit reaches the top tier only; a lower tier is authored
+  outright with "Simplify phrase at cursor" (`Alt+P`), not by editing the grid —
+  per-tier, note-by-note hand-editing remains future work.
 
 The backend (`routes.py`) keeps a `_sessions` dict keyed by session id, each
 owning an unpacked working directory. Every import format normalizes through

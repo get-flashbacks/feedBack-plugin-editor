@@ -14,6 +14,7 @@ import { editorToggleMixerPanel } from './mixer-panel.js';
 import { DPR, canvas } from './canvas.js';
 import { AddNoteCmd, ChangeFretCmd, ChangeFretGroupCmd, DeleteNotesCmd, MoveNoteCmd, ResizeSustainGroupCmd, SetPitchedSlideTargetsCmd, SetTeachingMarkCmd, SplitNotesCmd, ToggleTechniqueCmd, _execCyclePosition, _execMoveString, _execMoveStringSameFret, _rollAddByPitch, _splitViablePure, _withStableSelection } from './commands.js';
 import { hideContextMenu, promptBend, promptFret, promptSlide, promptSlideUnpitch, showContextMenu } from './context-menu.js';
+import { isDrumArrangement } from './drum-arrangement.js';
 import { _drumEditorDeleteSelection, _drumEditorNudgeVelocity, _drumEditorSetVelocity, _drumEditorToggleArticulation, _editorToggleDrumDensity } from './drum.js';
 import { ANCHOR_LANE_H, HS_LANE_H, LABEL_W, LANE_H, TIMELINE_TOP, TONE_LANE_H, WAVEFORM_H, xToTime, yToStr } from './geometry.js';
 import { hitNote } from './hit-test.js';
@@ -38,6 +39,7 @@ import { editorOpenCommandPalette } from './command-palette.js';
 import { editorToggleTabView } from './tab-view-live.js';
 import { editorExportGp5 } from './gp5-export.js';
 import { TempoGridCmd, _editorModulateTempoAtSelection, _editorTapTempoAtSelection, _editorToggleSyncLock, _editorToggleTempoMapMode, _tapTempoHandleKey, _tempoDeleteSelection, _tempoInsertSyncPoint, _tempoMapOnContextMenu, _tempoMeasureBeatCount, _tempoMeasureDenominator, _tempoPromptMeasureBpm, _tempoSetBeatsPerMeasure, _tempoSetDenominatorOnBeatsPure, _tempoPromptPickup, _tempoSelRangePure, editorAcceptWholeTempoFit } from './tempo.js';
+import { beatSecondsAt, findPhraseIndexAt, planTierSimplification, sliceByWindow, windowForPhrase } from './tiers.js';
 import { _tourNoteAction } from './tour.js';
 import { _signpostNote } from './signposts.js';
 import { _editorClampPopoverPure, _editorPromptText, setStatus } from './ui.js';
@@ -889,6 +891,57 @@ class AddPhraseCmd {
 }
 /* @pure:phrase-cmds:end */
 
+/* @pure:tier-cmds:start */
+// Issue #3 — the tier-LADDER write as a history command. The derivation and
+// refusals live in planTierSimplification (src/tiers.js, imported at the call
+// site); this command is purely the WRITE. It holds the phrase and the
+// pre-edit tier state by REFERENCE (no index math, no windowing), so
+// exec↔rollback swap the same objects back and forth verbatim regardless of
+// what the notes/chords around the phrase did meanwhile — the ladder is the
+// phrase's own state (tiers + max_difficulty), never stored anywhere else, so
+// a ref-restore is a full restore.
+class SimplifyPhraseCmd {
+    // Replaces a phrase's authored tier ladder wholesale: holds the phrase
+    // object and the previous tiers/max_difficulty by reference; exec swaps in
+    // the simplified ladder, rollback puts the old one back verbatim.
+    // songScope like AddPhraseCmd — tiers are arrangement STRUCTURE, not a
+    // fretted-note write, so the read-only-roll lock must not refuse it.
+    constructor(phrase, prevTiers, nextTiers, prevMaxDiff, nextMaxDiff) {
+        this.phrase = phrase;
+        this.prevTiers = prevTiers;
+        this.nextTiers = nextTiers;
+        this.prevMaxDiff = prevMaxDiff;
+        this.nextMaxDiff = nextMaxDiff;
+        this.songScope = true;
+    }
+    exec() {
+        this.phrase.tiers = this.nextTiers;
+        // Only when the plan minted a value: undefined/null mean "nothing to
+        // record", and writing them would put a garbage max_difficulty on the
+        // wire (the reader treats null as absent — keep it that way).
+        if (this.nextMaxDiff !== undefined && this.nextMaxDiff !== null) {
+            this.phrase.max_difficulty = this.nextMaxDiff;
+        }
+    }
+    // Restore EXACTLY what exec replaced. The delete paths keep ABSENCE
+    // restorable: a phrase the ladder model never touched must come back
+    // WITHOUT a tiers/max_difficulty key, not with an undefined-valued one
+    // the save body would serialize (and an undefined `tiers` would break
+    // the arrays-are-arrays tier contract a reload of history expects).
+    rollback() {
+        if (this.prevTiers === undefined) delete this.phrase.tiers;
+        else this.phrase.tiers = this.prevTiers;
+        // Same gate as exec, now as a restore: a value begets a value, an
+        // absent/null declared difficulty begets absence again.
+        if (this.prevMaxDiff === undefined || this.prevMaxDiff === null) {
+            delete this.phrase.max_difficulty;
+        } else {
+            this.phrase.max_difficulty = this.prevMaxDiff;
+        }
+    }
+}
+/* @pure:tier-cmds:end */
+
 function _editorAddPhraseAtCursor() {
     const arr = S.arrangements[S.currentArr];
     if (!arr) return false;
@@ -904,6 +957,69 @@ function _editorAddPhraseAtCursor() {
         { name, number: num, start_time: snapTime(S.cursorTime || 0), tiers: [] }));
     host.draw();
     setStatus('Phrase added');
+    return true;
+}
+
+// Issue #3 — author a lower difficulty tier for the phrase under the cursor:
+// slice the flat chart to the phrase's window and let planTierSimplification
+// (src/tiers.js) derive the rung and the resulting ladder. Refusals are
+// statuses only — nothing changed, so they never enter the undo history. The
+// new ladder lands in phrases[].tiers and save persists it via
+// `_repopulate_phrase_levels` → levels[]; the top tier stays the editable
+// flat chart, so chart editing is unaffected.
+function _editorSimplifyPhraseAtCursor() {
+    const arr = S.arrangements[S.currentArr];
+    if (!arr) return false;
+    // Phrases are pitched/instrument content — the drum grid has none to simplify.
+    if (isDrumArrangement(arr)) {
+        setStatus('Phrases apply to instrument tracks');
+        return false;
+    }
+    if (!Array.isArray(arr.phrases)) arr.phrases = [];
+    if (!arr.phrases.length) {
+        setStatus('No phrase at cursor — add one with Shift+P');
+        return false;
+    }
+    const idx = findPhraseIndexAt(arr.phrases, S.cursorTime || 0);
+    if (idx < 0) { setStatus('No phrase at cursor'); return false; }
+    const ph = arr.phrases[idx];
+    const { t0, t1 } = windowForPhrase(arr.phrases, idx);
+    // Window slices WITHOUT cloning — the planner clones whatever it stores,
+    // so these references never leak into it. Anchors slice the list the save
+    // path treats as the authored one (anchors_user when non-empty, else the
+    // computed/fallback anchors), so the tier holds what actually persists;
+    // handshapes ride their own time key, `start_time` (the chord-shape
+    // normalization's key, not the notes' `time`).
+    const anchorList = (Array.isArray(arr.anchors_user) && arr.anchors_user.length)
+        ? arr.anchors_user
+        : (Array.isArray(arr.anchors) ? arr.anchors : []);
+    const win = {
+        notes: sliceByWindow(arr.notes, t0, t1),
+        chords: sliceByWindow(arr.chords, t0, t1),
+        anchors: sliceByWindow(anchorList, t0, t1),
+        handshapes: sliceByWindow(Array.isArray(arr.handshapes) ? arr.handshapes : [], t0, t1, 'start_time'),
+    };
+    // Half a local beat is the shortest readable sustain for an easier tier;
+    // with no tempo map (fewer than two beats) there is no beat unit to
+    // measure against, so the micro-sustain cut is skipped (null = keep all).
+    const beatSecs = beatSecondsAt(S.beats, ph.start_time || 0);
+    const minSustain = (beatSecs && beatSecs > 0) ? beatSecs * 0.5 : null;
+    const plan = planTierSimplification(ph, win, { minSustain });
+    if (plan.error) { setStatus(plan.message); return false; }
+    // Capture the replaced state BEFORE exec — the command holds refs, so the
+    // pre-edit ladder must be read off the same object it will be restored onto.
+    const prevTiers = ph.tiers;
+    const prevMax = ph.max_difficulty;
+    S.history.exec(new SimplifyPhraseCmd(ph, prevTiers, plan.tiers, prevMax, plan.maxDifficulty));
+    host.draw();
+    // Terse and accurate by construction: every count is exactly what the
+    // plan just did (zero suffixes are omitted to keep the line readable).
+    const label = (ph.name || 'phrase') + (ph.number != null ? ' ' + ph.number : '');
+    let msg = `Tier ${plan.addedDifficulty} added to ${label} — ${plan.keptNoteCount}/${plan.srcNoteCount} notes kept`;
+    if (plan.droppedChain > 0) msg += `, chains ${plan.droppedChain} dropped`;
+    if (plan.droppedShort > 0) msg += `, short ${plan.droppedShort} dropped`;
+    if (plan.thinned > 0) msg += `, ${plan.thinned} chord(s) thinned`;
+    setStatus(msg);
     return true;
 }
 
@@ -1359,6 +1475,7 @@ export function _editorRunEofCommand(cmd) {
     case 'resnapSelection': return _editorResnapSelection();
     case 'addSection': return _editorAddSectionAtCursor();
     case 'addPhrase': return _editorAddPhraseAtCursor();
+    case 'simplifyPhrase': return _editorSimplifyPhraseAtCursor();
     case 'addToneChange': return _editorAddToneAtCursor();
     case 'addHandshape': return _editorAddHandshapeFromSelection();
     case 'toggleTempoMap': return _editorToggleTempoMapMode();
