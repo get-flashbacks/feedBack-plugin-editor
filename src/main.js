@@ -878,13 +878,23 @@ if (typeof window.__editorScreenTeardown === 'function') {
 }
 const _globalListeners = _makeListenerRegistry();
 let _editorScreenObs = null;
+// Dispose handle for this injection's DPR watcher (canvas.js's _watchDpr) —
+// released by the teardown below so a re-injection can't stack a second one.
+let _watchDprDispose = null;
 // Handle for the pre-canvas boot poller (setInterval below) so the teardown
 // can stop a late-firing interval from re-running a torn-down injection.
 let _bootPollInterval = null;
 window.__editorScreenTeardown = () => {
+    // Every release below must swallow its own failure: an optional hook this
+    // build never armed (or a handle the sliced test env doesn't name) has to
+    // be a no-op, not a reason to abandon the rest of the teardown. One nested
+    // guard keeps this method a flat list of releases — a try/catch per line
+    // is what pushed it over the complexity gate.
+    const _safely = (fn) => { try { fn(); } catch (_) {} };
+
     // Unblock any awaiting session-transition prompt before its listener is
     // swept below, so a re-injection can't strand guardSessionTransition.
-    try { dismissSessionPrompt(); } catch (_) {}
+    _safely(() => { dismissSessionPrompt(); });
     _globalListeners.removeAll();
     // Stop any playback this injection owns — the audio graph outlives the
     // DOM, so a replaced screen would otherwise keep sounding.
@@ -892,23 +902,27 @@ window.__editorScreenTeardown = () => {
     // typeof-guarded for the sliced boot_teardown suite (its extracted env
     // stubs only what it names — the same convention as the #98 hook below).
     if (typeof teardownTabView === 'function') teardownTabView();   // engraving api dies with the mount DOM
-    try { if (_editorScreenObs) { _editorScreenObs.disconnect(); _editorScreenObs = null; } } catch (_) {}
-    try { if (_v3TopbarWatch) { _v3TopbarWatch.disconnect(); _v3TopbarWatch = null; } } catch (_) {}
+    _safely(() => { if (_editorScreenObs) { _editorScreenObs.disconnect(); _editorScreenObs = null; } });
+    _safely(() => { if (_v3TopbarWatch) { _v3TopbarWatch.disconnect(); _v3TopbarWatch = null; } });
     // The v3 layout ResizeObserver watches #v3-topbar, a shell-persistent node
     // that survives re-injection — without this disconnect it (and its fit()
     // closure) would stack one per re-inject.
-    try { if (_v3LayoutObs) { _v3LayoutObs.disconnect(); _v3LayoutObs = null; } } catch (_) {}
+    _safely(() => { if (_v3LayoutObs) { _v3LayoutObs.disconnect(); _v3LayoutObs = null; } });
     // The canvas-wrap ResizeObserver: without this it stacks one per re-inject,
     // each holding a resizeCanvas closure over a replaced DOM.
-    try { if (_canvasWrapObs) { _canvasWrapObs.disconnect(); _canvasWrapObs = null; } } catch (_) {}
+    _safely(() => { if (_canvasWrapObs) { _canvasWrapObs.disconnect(); _canvasWrapObs = null; } });
+    // Same story for the DPR watcher: the pending matchMedia subscription is
+    // module-level in canvas.js, so a stale one would call the previous
+    // injection's resizeCanvas (and stack one watcher per re-inject).
+    _safely(() => { if (_watchDprDispose) { _watchDprDispose(); _watchDprDispose = null; } });
     // Stop the pre-canvas boot poller if it's still spinning.
-    try { if (_bootPollInterval) { clearInterval(_bootPollInterval); _bootPollInterval = null; } } catch (_) {}
+    _safely(() => { if (_bootPollInterval) { clearInterval(_bootPollInterval); _bootPollInterval = null; } });
     // Release the drum strip's MIDI monitor tap + device session (no-op if it
     // was never armed) so a re-injection can't leak the session or stack taps.
-    try { teardownDrumPadStrip(); } catch (_) {}
+    _safely(() => { teardownDrumPadStrip(); });
     // Cancel #98's pending coalesced repaint if that PR is present (no-op when
     // it isn't) — mirrors the codebase's typeof-guarded optional-hook pattern.
-    if (typeof _cancelPendingDraw === 'function') { try { _cancelPendingDraw(); } catch (_) {} }
+    if (typeof _cancelPendingDraw === 'function') { _safely(() => { _cancelPendingDraw(); }); }
 };
 
 // Leaving the Song Editor has to silence it. The Web Audio graph and the
@@ -2333,8 +2347,9 @@ function init() {
     // window 'resize' — canvas.js's cached DPR was never refreshed for this,
     // so the canvas kept rendering at the old pixel density. resizeCanvas()
     // reads the live DPR binding to re-derive canvas.width/height off the
-    // new value.
-    _watchDpr(() => resizeCanvas());
+    // new value. The watcher hands back a dispose handle; the screen teardown
+    // drops it so a re-injection can't stack a second one.
+    _watchDprDispose = _watchDpr(() => resizeCanvas());
     // src/create.js's global 'input' listener. It used to be a top-level
     // statement in this file; a module must not have import-time side effects.
     initCreate();
