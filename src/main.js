@@ -884,9 +884,13 @@ let _bootPollInterval = null;
 // Dispose for canvas.js's DPR watcher — the matchMedia chain outlives the
 // registry below (it lives on window), so the teardown must unhook it by hand.
 let _stopDprWatch = null;
-window.__editorScreenTeardown = () => {
+
+// Soft cleanup steps that don't own module-level resource slots. Split out of
+// __editorScreenTeardown so the published closure stays under the complexity
+// budget CodeFactor enforces on it.
+function _teardownScreenSoft() {
     // Unblock any awaiting session-transition prompt before its listener is
-    // swept below, so a re-injection can't strand guardSessionTransition.
+    // swept, so a re-injection can't strand guardSessionTransition.
     try { dismissSessionPrompt(); } catch (_) {}
     _globalListeners.removeAll();
     // Stop any playback this injection owns — the audio graph outlives the
@@ -895,6 +899,19 @@ window.__editorScreenTeardown = () => {
     // typeof-guarded for the sliced boot_teardown suite (its extracted env
     // stubs only what it names — the same convention as the #98 hook below).
     if (typeof teardownTabView === 'function') teardownTabView();   // engraving api dies with the mount DOM
+    // Release the drum strip's MIDI monitor tap + device session (no-op if it
+    // was never armed) so a re-injection can't leak the session or stack taps.
+    try { teardownDrumPadStrip(); } catch (_) {}
+    // Cancel #98's pending coalesced repaint if that PR is present (no-op when
+    // it isn't) — mirrors the codebase's typeof-guarded optional-hook pattern.
+    if (typeof _cancelPendingDraw === 'function') { try { _cancelPendingDraw(); } catch (_) {} }
+}
+
+// Observers this injection created. Each lives in a module-level slot so a
+// re-injection can null it out; they watch nodes that survive re-injection, so
+// left connected they (and their closures) would stack one per re-inject. A
+// throwing disconnect never blocks the rest of the teardown.
+function _teardownScreenObservers() {
     try { if (_editorScreenObs) { _editorScreenObs.disconnect(); _editorScreenObs = null; } } catch (_) {}
     try { if (_v3TopbarWatch) { _v3TopbarWatch.disconnect(); _v3TopbarWatch = null; } } catch (_) {}
     // The v3 layout ResizeObserver watches #v3-topbar, a shell-persistent node
@@ -904,18 +921,23 @@ window.__editorScreenTeardown = () => {
     // The canvas-wrap ResizeObserver: without this it stacks one per re-inject,
     // each holding a resizeCanvas closure over a replaced DOM.
     try { if (_canvasWrapObs) { _canvasWrapObs.disconnect(); _canvasWrapObs = null; } } catch (_) {}
+}
+
+// One-shot handles that outlive the observer registry: the pre-canvas boot
+// poller and canvas.js's DPR watcher (its matchMedia query lives on window).
+function _teardownScreenHandles() {
     // Stop the pre-canvas boot poller if it's still spinning.
     try { if (_bootPollInterval) { clearInterval(_bootPollInterval); _bootPollInterval = null; } } catch (_) {}
     // Unhook the DPR watcher: its matchMedia query is pending on window, not
     // tracked by _globalListeners, and the chain re-subscribes forever — left
     // running it would resize a canvas the next injection already owns.
     try { if (_stopDprWatch) { _stopDprWatch(); _stopDprWatch = null; } } catch (_) {}
-    // Release the drum strip's MIDI monitor tap + device session (no-op if it
-    // was never armed) so a re-injection can't leak the session or stack taps.
-    try { teardownDrumPadStrip(); } catch (_) {}
-    // Cancel #98's pending coalesced repaint if that PR is present (no-op when
-    // it isn't) — mirrors the codebase's typeof-guarded optional-hook pattern.
-    if (typeof _cancelPendingDraw === 'function') { try { _cancelPendingDraw(); } catch (_) {} }
+}
+
+window.__editorScreenTeardown = () => {
+    _teardownScreenSoft();
+    _teardownScreenObservers();
+    _teardownScreenHandles();
 };
 
 // Leaving the Song Editor has to silence it. The Web Audio graph and the
