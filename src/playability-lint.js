@@ -52,10 +52,24 @@ export const LINT_DEFAULT_WINDOW = 4;         // anchor width when none authored
 
 // Keys (piano) thresholds — the pedagogy seat's numbers. Semitone spans.
 export const KEYS_SPAN_WARN = 12;   // over an OCTAVE in one hand — a real stretch
-export const KEYS_SPAN_ERR = 16;    // over a 10th — beyond most hands (large-hand exception: TODO)
+export const KEYS_SPAN_ERR_DEFAULT = 16; // over a 10th — beyond most hands
 export const KEYS_HAND_MAX = 5;     // five fingers; more than five in one hand at once is impossible
 export const KEYS_MUDDY_LOW_MIDI = 40;  // ~E2 — dense voicings below here turn to mud
 export const KEYS_MUDDY_INTERVAL = 4;   // two lowest within a major 3rd = a muddy close voicing
+
+// Configurable max hand span for keys (semitones). Default 16 (10th); users with
+// large hands can increase (e.g., 18 for 11th, 19 for 12th). Stored as editorKeysMaxSpan.
+export function _editorKeysMaxSpan() {
+    try {
+        const v = parseInt(localStorage.getItem('editorKeysMaxSpan') || '', 10);
+        return Number.isFinite(v) && v >= 12 ? v : KEYS_SPAN_ERR_DEFAULT;
+    } catch (_) { return KEYS_SPAN_ERR_DEFAULT; }
+}
+export function _editorSetKeysMaxSpan(v) {
+    const n = Number.isFinite(v) ? Math.max(12, Math.floor(v)) : KEYS_SPAN_ERR_DEFAULT;
+    try { localStorage.setItem('editorKeysMaxSpan', String(n)); } catch (_) {}
+    return n;
+}
 
 // The fret-hand anchor list: authored anchors win, computed fall back —
 // the same dual-list precedence the tempo remap and the roll resolver use.
@@ -296,10 +310,11 @@ export function _keysLintPure(nn) {
                 const midis = group.map((e) => _keysMidiPure(e.n));
                 const span = Math.max(...midis) - Math.min(...midis);
                 if (span > KEYS_SPAN_WARN) {
+                    const maxSpan = _editorKeysMaxSpan();
                     issues.push({
                         rule: 'keys-span', time: t0, indices: group.map((e) => e.i),
-                        detail: span > KEYS_SPAN_ERR
-                            ? `${span}-semitone reach in one hand (beyond a 10th)`
+                        detail: span > maxSpan
+                            ? `${span}-semitone reach in one hand (beyond a ${maxSpan - 6}th)`
                             : `${span}-semitone reach in one hand (over an octave)`,
                     });
                 }
