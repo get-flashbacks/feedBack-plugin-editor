@@ -27,7 +27,7 @@ python -m pytest                      # backend suites in tests/test_*.py
 
 ## Testing conventions
 
-- Suites are `tests/*.test.mjs` (real-import ESM); `node --test` matches the
+- Suites are `tests/*.test.{js,mjs}` (real-import ESM); `node --test` matches the
   `.test.` segment, so shared fixtures like `tests/_history_env.mjs` and
   `tests/__init__.py` are **not** picked up — do not name a fixture `*.test.*`.
 - Seed the real `S` (`Object.assign`, never reassign), stub only the DOM slice you
