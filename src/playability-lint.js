@@ -71,6 +71,15 @@ export function _editorSetKeysMaxSpan(v) {
     return n;
 }
 
+// Semitone span → interval degree number, per the keys-span mapping (16→10th,
+// 18→11th, 19→12th). `span - 6` only lands for 16; compound intervals are
+// 7*octaves + simpleDegree (the tritone = aug. 4th), giving 18→11th, 19→12th.
+export function _spanToIntervalNumberPure(span) {
+    if (!Number.isFinite(span) || span < 0) return null;
+    const simple = [1, 2, 2, 3, 3, 4, 4, 5, 6, 6, 7, 7][span % 12];
+    return 7 * Math.floor(span / 12) + simple;
+}
+
 // The fret-hand anchor list: authored anchors win, computed fall back —
 // the same dual-list precedence the tempo remap and the roll resolver use.
 export function _lintAnchorsPure(arr) {
@@ -314,7 +323,7 @@ export function _keysLintPure(nn) {
                     issues.push({
                         rule: 'keys-span', time: t0, indices: group.map((e) => e.i),
                         detail: span > maxSpan
-                            ? `${span}-semitone reach in one hand (beyond a ${maxSpan - 6}th)`
+                            ? `${span}-semitone reach in one hand (beyond a ${_spanToIntervalNumberPure(maxSpan)}th)`
                             : `${span}-semitone reach in one hand (over an octave)`,
                     });
                 }

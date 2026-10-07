@@ -10,7 +10,7 @@
  */
 import assert from 'node:assert';
 import { S } from '../src/state.js';
-import { _keysLintPure, _lintResults } from '../src/playability-lint.js';
+import { _keysLintPure, _lintResults, _spanToIntervalNumberPure } from '../src/playability-lint.js';
 
 // A keys note: pitch is the piano-locked string*24 + fret packing; the hand
 // ('lh'/'rh') rides under techniques, absent = unassigned.
@@ -46,6 +46,32 @@ t('over an octave in one hand warns; beyond a 10th escalates', () => {
 
     const beyond = _keysLintPure([kn(60, 0, 'rh'), kn(77, 0, 'rh')]);   // span 17
     assert.match(beyond[0].detail, /beyond a 10th/);
+});
+
+t('_spanToIntervalNumberPure: documented span→degree mapping (not span-6)', () => {
+    // L60-61: 16→10th, 18→11th, 19→12th. span-6 would give 12,13 for 18,19.
+    assert.strictEqual(_spanToIntervalNumberPure(16), 10);
+    assert.strictEqual(_spanToIntervalNumberPure(18), 11);
+    assert.strictEqual(_spanToIntervalNumberPure(19), 12);
+    assert.strictEqual(_spanToIntervalNumberPure(13), 9);     // minor 9th
+    assert.strictEqual(_spanToIntervalNumberPure(17), 11);     // perfect 11th
+    assert.strictEqual(_spanToIntervalNumberPure(20), 13);     // minor 13th
+    assert.strictEqual(_spanToIntervalNumberPure(0), 1);       // unison
+    assert.strictEqual(_spanToIntervalNumberPure(-1), null);
+    assert.strictEqual(_spanToIntervalNumberPure(NaN), null);
+});
+
+t('err detail names the configured threshold interval (18→11th, 19→12th), not span-6', () => {
+    const orig = globalThis.localStorage;
+    const stub = (n) => { globalThis.localStorage = {
+        getItem: (k) => k === 'editorKeysMaxSpan' ? String(n) : null, setItem: () => {},
+    }; };
+    try {
+        stub(18);
+        assert.match(_keysLintPure([kn(60, 0, 'rh'), kn(79, 0, 'rh')])[0].detail, /beyond a 11th/);   // span 19 > 18
+        stub(19);
+        assert.match(_keysLintPure([kn(60, 0, 'rh'), kn(80, 0, 'rh')])[0].detail, /beyond a 12th/);   // span 20 > 19
+    } finally { globalThis.localStorage = orig; }
 });
 
 t('span is PER HAND — a wide two-hand voicing is fine', () => {
