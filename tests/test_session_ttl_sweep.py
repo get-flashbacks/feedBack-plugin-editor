@@ -176,3 +176,39 @@ def test_dispose_helper_removes_temp_dir(build_routes, tmp_path):
     assert not (tmp_path / "sandbox").exists()
     # Unknown session id is a clean no-op.
     assert routes._dispose_editor_session(sessions, "missing") is False
+
+
+class _StopLoop(Exception):
+    """Raised from the loop's sleep slot (outside its try) to end the run."""
+
+
+def test_sweep_loop_logs_failures_under_the_convention_logger(
+        build_routes, monkeypatch, caplog):
+    """The loop's except branch logs to `slopsmith.plugin.editor`, the name
+    every other route uses. It once logged to `feedBack.editor`, a name used
+    nowhere else in the file, so sweep failures never surfaced — pin the
+    destination so it cannot drift back."""
+    routes = build_routes
+
+    async def _boom(sessions):
+        raise RuntimeError("sweep exploded")
+
+    monkeypatch.setattr(routes, "_sweep_idle_editor_sessions", _boom)
+
+    real_sleep = asyncio.sleep
+    state = {"slept": False}
+
+    async def _sleep_then_stop(_delay):
+        if state["slept"]:
+            raise _StopLoop
+        state["slept"] = True
+        await real_sleep(0)
+
+    monkeypatch.setattr(routes.asyncio, "sleep", _sleep_then_stop)
+
+    with pytest.raises(_StopLoop):
+        asyncio.run(routes._editor_session_sweep_loop({}, interval=0))
+
+    logged = [record.name for record in caplog.records
+              if "editor session sweep failed" in record.getMessage()]
+    assert logged == ["slopsmith.plugin.editor"]

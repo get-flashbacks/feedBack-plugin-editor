@@ -224,7 +224,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`"feedBack.editor"`) that doesn't match the one every other route logs to
   (`"slopsmith.plugin.editor"`), so a sweep failure was invisible. Lifted the
   sweep, the dispose helper and the TTL/interval constants to module scope,
-  parameterized by the `sessions` dict so they're callable in-process with a
+  parameterized by the `sessions` dict so they're callable in-process with an
   injectable `now` (the `@app.on_event("startup")` loop is the only thing that
   runs in production; tests drive it directly). Fixed the logger name.
   `tests/test_session_ttl_sweep.py` pins idle eviction + temp-sandbox removal,
