@@ -6,10 +6,12 @@
 import { _ensureOnsetsShifted } from './audio.js';
 import { S } from './state.js';
 import { TempoMapCmd, _respaceWithLocksPure, _tempoPivotTimePure } from './tempo.js';
-import { setStatus } from './ui.js';
+import { _installModalKeyboard, setStatus } from './ui.js';
 import { host } from './host.js';
 
 let syncState = { tabBPM: 0, audioBPM: 0 };
+let _syncDialogPrevFocus = null;
+let _syncDialogKbInstalled = false;
 
 /* @pure:detect-onsets:start */
 // Tempo + downbeat phase from the ONSET STRIP (D3): the strip (audio.js,
@@ -229,6 +231,20 @@ export function editorSyncTempo() {
     dlg.style.left = rect.left + 'px';
     dlg.style.top = (rect.bottom + 4) + 'px';
     dlg.classList.remove('hidden');
+    _syncDialogPrevFocus = document.activeElement;
+    if (!_syncDialogKbInstalled) {
+        _syncDialogKbInstalled = true;
+        // No wrapping panel: the BPM input and the Apply/Cancel row are
+        // SIBLINGS of the title div, so the trap's inner must be the
+        // dialog itself — bound to firstElementChild it queries only the
+        // title and finds nothing to wrap.
+        _installModalKeyboard(dlg, dlg, editorHideSyncDialog);
+    }
+    // Focus the primary control: the helper's listener sits on the dialog
+    // and only sees Escape/Tab once focus is inside it. (Focusing the
+    // dialog root would not trap — inner === dlg reads root focus as
+    // "inside" and Tab would walk out through the siblings' DOM order.)
+    document.getElementById('sync-manual-bpm')?.focus();
     setStatus('Ready');
 }
 
@@ -246,6 +262,9 @@ export function editorSyncUpdateFactor() {
 
 export function editorHideSyncDialog() {
     document.getElementById('editor-sync-dialog').classList.add('hidden');
+    const prev = _syncDialogPrevFocus;
+    _syncDialogPrevFocus = null;
+    if (prev && prev.isConnected && prev.focus) prev.focus();
 }
 
 export function editorApplySync() {

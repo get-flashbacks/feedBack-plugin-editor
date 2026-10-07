@@ -201,6 +201,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Every static dialog now closes on Escape, traps Tab focus, and returns
+  focus to its opener — one modal keyboard policy (#31, P1.6).** The nine
+  import/authoring modals already routed through `_installModalKeyboard`, but
+  the remaining static dialogs in `screen.html` (Load, Create New Arrangement,
+  Canvas Appearance, Tab Preview, User Guide, Audio Tracks (stem manager) and
+  the Sync Tempo dialog) kept their own ad hoc open/close paths: Escape did
+  nothing while they were open (Tab could walk focus into the dimmed page
+  behind them, letting global shortcuts fire through the overlay), and no
+  path beyond Canvas Appearance handed the keyboard back to the control that
+  opened the dialog. All of them now install the shared helper on first show
+  (once — they are persistent DOM, not rebuilt per open) and their close
+  paths — the ✕/Cancel buttons, the global Escape sweep in `main.js`, the
+  stem manager's close button — go through the shared hide functions, each of
+  which restores focus to the recorded opener.
 - **A per-track audio offset now extends the timeline bound and scroll reach.**
   The two duration sites — `_audioTimelineDuration()` (playback cursor clamp and
   loop-restart) and `_editorClampScrollX()` (the scroll bound the minimap, wheel,

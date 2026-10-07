@@ -136,6 +136,9 @@ export function editorShowNewFormatPicker() {
 }
 
 
+let _createModalKbInstalled = false;
+let _createModalPrevFocus = null;
+
 export function editorShowCreateModal() {
     // Fresh state each open so a prior session (roster / audio / gp8AudioMode /
     // autoSyncAudioUrl / lastSync) can't leak in. Default roster: one Lead
@@ -163,7 +166,16 @@ export function editorShowCreateModal() {
     const setVal = (id) => { const el = document.getElementById(id); if (el) el.value = ''; };
     const setTxt = (id) => { const el = document.getElementById(id); if (el) el.textContent = ''; };
     const hide = (id) => document.getElementById(id)?.classList.add('hidden');
-    document.getElementById('editor-create-modal')?.classList.remove('hidden');
+    const modal = document.getElementById('editor-create-modal');
+    modal.classList.remove('hidden');
+    _createModalPrevFocus = document.activeElement;
+    if (!_createModalKbInstalled) {
+        _createModalKbInstalled = true;
+        _installModalKeyboard(modal, modal.firstElementChild, editorHideCreateModal);
+    }
+    // Move focus into the dialog so Escape/Tab work before the first click:
+    // the helper's listener sits on the modal and only sees keys from inside.
+    modal.focus();
     hide('editor-create-tracks');
     const go = document.getElementById('editor-create-go'); if (go) go.disabled = true;
     setTxt('editor-create-status');
@@ -187,6 +199,9 @@ export function editorShowCreateModal() {
 
 export function editorHideCreateModal() {
     document.getElementById('editor-create-modal').classList.add('hidden');
+    const prev = _createModalPrevFocus;
+    _createModalPrevFocus = null;
+    if (prev && prev.isConnected && prev.focus) prev.focus();
 }
 
 // ════════════════════════════════════════════════════════════════════

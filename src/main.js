@@ -73,8 +73,8 @@ import {
 } from './arrangement.js';
 import {
     _activeArrangementExceedsArchiveLimit, _editorLoadsInFlight, _resetOffsetUI,
-    editorHideSaveFormatModal, editorSave, editorSaveAs, editorSaveAsSloppakConfirm, filterSongs, loadCDLC,
-    saveCDLC, showLoadModal
+    editorHideSaveFormatModal, editorSave, editorSaveAs, editorSaveAsSloppakConfirm, filterSongs, hideLoadModal,
+    loadCDLC, saveCDLC, showLoadModal
 } from './file-ops.js';
 import {
     editorApplyReplaceAudio, editorHideReplaceAudioModal, editorSetReplaceAudioMode,
@@ -744,11 +744,24 @@ window.editorHideTabPreview = editorHideTabPreview;
 // overlay's hidden class like the other editor modals. Content is static HTML in
 // screen.html (canonical copy: docs/USER-GUIDE.md). Wired to window so the Help
 // menu's fn-item can reach it and the model's fns gate sees it.
+let _userGuidePrevFocus = null;
+let _userGuideKbInstalled = false;
 window.editorToggleUserGuide = (force) => {
     const modal = document.getElementById('editor-user-guide-modal');
     if (!modal) return;
     const show = force === undefined ? modal.classList.contains('hidden') : !!force;
     modal.classList.toggle('hidden', !show);
+    if (show) {
+        _userGuidePrevFocus = document.activeElement;
+        if (!_userGuideKbInstalled) {
+            _userGuideKbInstalled = true;
+            _installModalKeyboard(modal, modal.firstElementChild, () => window.editorToggleUserGuide(false));
+        }
+    } else {
+        const prev = _userGuidePrevFocus;
+        _userGuidePrevFocus = null;
+        if (prev && prev.isConnected && prev.focus) prev.focus();
+    }
 };
 
 window.editorHideRecordMidiModal = editorHideRecordMidiModal;
@@ -1616,7 +1629,7 @@ window.editorSetRightClickBehavior = editorSetRightClickBehavior;
 window.editorSetChordSelectBehavior = editorSetChordSelectBehavior;
 window.editorSetShortcutDiffFilter = editorSetShortcutDiffFilter;
 window.editorShowLoadModal = showLoadModal;
-window.editorHideLoadModal = () => document.getElementById('editor-load-modal').classList.add('hidden');
+window.editorHideLoadModal = hideLoadModal;   // shared close: restores focus to the opener
 window.editorFilterSongs = filterSongs;
 window.editorLoadFile = (f) => { window.editorHideLoadModal(); loadCDLC(f); };
 window.editorSave = editorSave;   // first save → file explorer, then saves to it

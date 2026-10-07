@@ -8,6 +8,7 @@
 
 import { S } from './state.js';
 import { arrKind } from './instrument.js';
+import { _installModalKeyboard } from './ui.js';
 
 /* @pure:tab-preview:start */
 // Guard: which parts can preview, with the exact user-facing reason when
@@ -92,6 +93,8 @@ export function _tabPreviewLoadScript() {
 
 let _tabPreviewApi = null;
 let _tabPreviewSeq = 0;   // stale-render guard across rapid refreshes
+let _tabPreviewPrevFocus = null;
+let _tabPreviewKbInstalled = false;
 
 function _tabPreviewStatus(msg) {
     const el = document.getElementById('editor-tab-preview-status');
@@ -178,6 +181,11 @@ export function _editorShowTabPreview() {
         title.textContent = 'Tab preview — ' + ((arr && arr.name) || 'part') + ' (as last saved)';
     }
     modal.classList.remove('hidden');
+    _tabPreviewPrevFocus = document.activeElement;
+    if (!_tabPreviewKbInstalled) {
+        _tabPreviewKbInstalled = true;
+        _installModalKeyboard(modal, modal.firstElementChild, editorHideTabPreview);
+    }
     _tabPreviewRender();
     return true;
 }
@@ -187,6 +195,9 @@ export const editorRefreshTabPreview = () => { _tabPreviewRender(); };
 export const editorHideTabPreview = () => {
     const modal = document.getElementById('editor-tab-preview-modal');
     if (modal) modal.classList.add('hidden');
+    const prev = _tabPreviewPrevFocus;
+    _tabPreviewPrevFocus = null;
+    if (prev && prev.isConnected && prev.focus) prev.focus();
     // Free the engraving resources — the modal is refresh-on-open, so
     // nothing may keep laying out behind a hidden panel.
     _tabPreviewSeq++;
