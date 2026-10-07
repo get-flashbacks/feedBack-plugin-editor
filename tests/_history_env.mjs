@@ -54,6 +54,7 @@ if (typeof globalThis.document === 'undefined') {
                 setAttribute() {}, getAttribute: () => null,
                 querySelector: () => null, querySelectorAll: () => [],
                 addEventListener() {}, removeEventListener() {}, appendChild() {},
+                focus() {}, blur() {},
             });
         },
     };

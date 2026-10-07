@@ -1,7 +1,13 @@
 /*
- * Create modal keyboard routing — Escape closes, focus restores, Tab traps.
+ * Sync Tempo dialog keyboard routing — fresh-open focus, Escape closes +
+ * restores, and the trap wraps across the dialog's SIBLING children.
  *
- * Run: node tests/create_modal_keyboard.test.mjs
+ * The dialog has no wrapping panel: the title, the content block (holding
+ * the BPM input) and the Apply/Cancel row are siblings, so the helper's
+ * `inner` must be the dialog itself — bound to firstElementChild (the
+ * title) it finds nothing to wrap and Tab falls through to the page.
+ *
+ * Run: node tests/sync_dialog_keyboard.test.mjs
  */
 import assert from 'node:assert';
 
@@ -45,18 +51,16 @@ function mkEl(id, opts = {}) {
             }
         },
         contains(n) { return n === this || children.some((c) => c.contains && c.contains(n)); },
-        querySelector(sel) {
-            const all = this._all();
-            if (sel.startsWith('button')) return all.find((e) => e.tagName === 'BUTTON') || null;
-            if (sel.startsWith('input')) return all.find((e) => e.tagName === 'INPUT') || null;
-            if (sel.startsWith('select')) return all.find((e) => e.tagName === 'SELECT') || null;
-            return null;
-        },
         querySelectorAll(sel) {
             const all = this._all();
-            if (sel.includes('button')) return all.filter((e) => e.tagName === 'BUTTON');
-            return [];
+            const want = [];
+            if (sel.includes('button')) want.push('BUTTON');
+            if (sel.includes('input')) want.push('INPUT');
+            if (sel.includes('select')) want.push('SELECT');
+            if (sel.includes('textarea')) want.push('TEXTAREA');
+            return all.filter((e) => want.includes(e.tagName));
         },
+        querySelector(sel) { return this.querySelectorAll(sel)[0] || null; },
         get firstElementChild() { return children[0] || null; },
         _all() {
             let out = [...children];
@@ -71,20 +75,33 @@ function mkEl(id, opts = {}) {
 
 const registry = new Map();
 function reg(id, el) { registry.set(id, el); return el; }
-function byId(id) { return registry.get(id) || null; }
+// Auto-create on first lookup: the show path writes textContent into a
+// handful of readout spans the keyboard tests don't otherwise care about.
+function byId(id) {
+    if (!registry.has(id)) registry.set(id, mkEl(id));
+    return registry.get(id);
+}
 
 function reset() {
     activeEl = null;
 }
 
-// Build ONE persistent modal + inner panel with two focusable buttons.
-const modal = reg('editor-create-modal', mkEl('editor-create-modal', { className: 'fixed inset-0 z-50' }));
-const inner = mkEl('editor-create-modal:inner');
-modal.appendChild(inner);
-const b1 = mkEl('b1', { tag: 'button' });
-const b2 = mkEl('b2', { tag: 'button' });
-inner.appendChild(b1);
-inner.appendChild(b2);
+// The shipped markup: title, content (BPM input) and the button row are
+// SIBLINGS of #editor-sync-dialog — not nested under the title.
+const dlg = reg('editor-sync-dialog', mkEl('editor-sync-dialog', { className: 'absolute z-50' }));
+const title = mkEl('sync-title');
+const content = mkEl('sync-content');
+const bpm = reg('sync-manual-bpm', mkEl('sync-manual-bpm', { tag: 'input' }));
+const row = mkEl('sync-buttons');
+const apply = mkEl('sync-apply', { tag: 'button' });
+const cancel = mkEl('sync-cancel', { tag: 'button' });
+dlg.appendChild(title);
+dlg.appendChild(content); content.appendChild(bpm);
+dlg.appendChild(row); row.appendChild(apply); row.appendChild(cancel);
+
+const openerBtn = reg('editor-sync-btn', mkEl('editor-sync-btn'));
+openerBtn.getBoundingClientRect = () => ({ left: 0, bottom: 0 });
+reg('editor-status', mkEl('editor-status'));
 
 function dispatchKey(el, key, opts = {}) {
     const evt = {
@@ -109,8 +126,22 @@ globalThis.document = {
 globalThis.window = globalThis.window || globalThis;
 globalThis.localStorage = globalThis.localStorage || { getItem: () => null, setItem: () => {} };
 
+const { S } = await import('../src/state.js');
 const { setHostHooks } = await import('../src/host.js');
 setHostHooks({ draw: () => {}, updateStatus: () => {}, ensureArr: () => true });
+
+// Minimal chart + silence so editorSyncTempo reaches the dialog block:
+// two downbeats for getTabBPM, a short buffer for detectAudioBPM.
+Object.assign(S, {
+    beats: [
+        { time: 0, measure: 1, den: 4 },
+        { time: 0.5, measure: -1, den: 4 },
+        { time: 1, measure: 2, den: 4 },
+    ],
+    audioBuffer: { sampleRate: 44100, duration: 0.05, getChannelData: () => new Float32Array(2205) },
+    audioShift: 0,
+    activeAudioSourceOffset: 0,
+});
 
 let pass = 0, fail = 0;
 async function t(name, fn) {
@@ -118,50 +149,48 @@ async function t(name, fn) {
     catch (e) { fail++; console.error('  FAIL ' + name + ': ' + e.message); }
 }
 
+const show = async () => {
+    const { editorSyncTempo } = await import('../src/sync-tempo.js');
+    editorSyncTempo();
+};
+
 // ── Tests ───────────────────────────────────────────────────────────
-await t('Escape closes the Create modal and restores focus to the opener', async () => {
+await t('opening Sync Tempo moves focus to the manual BPM input', async () => {
+    reset();
+    await show();
+    assert.ok(!dlg.classList.contains('hidden'), 'dialog visible');
+    assert.strictEqual(activeEl, bpm, 'focus sits on the BPM input');
+});
+
+await t('Escape closes the dialog and restores focus to the opener', async () => {
     reset();
     const opener = mkEl('opener');
     opener.focus();
 
-    const { editorShowCreateModal } = await import('../src/create.js');
-    editorShowCreateModal();
-    assert.ok(!modal.classList.contains('hidden'), 'modal visible');
-    b1.focus();
-
-    dispatchKey(modal, 'Escape');
-    assert.ok(modal.classList.contains('hidden'), 'modal hidden after Escape');
+    await show();
+    dispatchKey(dlg, 'Escape');
+    assert.ok(dlg.classList.contains('hidden'), 'dialog hidden after Escape');
     assert.strictEqual(activeEl, opener, 'focus restored to opener');
 });
 
-await t('Tab from last focusable wraps to first inside Create modal', async () => {
+await t('Tab from Cancel wraps to the BPM input', async () => {
     reset();
-    const { editorShowCreateModal } = await import('../src/create.js');
-    editorShowCreateModal();
-    b2.focus();
-    assert.strictEqual(activeEl, b2);
+    await show();
+    cancel.focus();
+    assert.strictEqual(activeEl, cancel);
 
-    dispatchKey(modal, 'Tab');
-    assert.strictEqual(activeEl, b1, 'Tab from last wraps to first');
+    dispatchKey(dlg, 'Tab');
+    assert.strictEqual(activeEl, bpm, 'Tab from last wraps to first');
 });
 
-await t('Shift+Tab from first focusable wraps to last inside Create modal', async () => {
+await t('Shift+Tab from the BPM input wraps to Cancel', async () => {
     reset();
-    const { editorShowCreateModal } = await import('../src/create.js');
-    editorShowCreateModal();
-    b1.focus();
-    assert.strictEqual(activeEl, b1);
+    await show();
+    bpm.focus();
+    assert.strictEqual(activeEl, bpm);
 
-    dispatchKey(modal, 'Tab', { shift: true });
-    assert.strictEqual(activeEl, b2, 'Shift+Tab from first wraps to last');
-});
-
-await t('opening the Create modal moves focus into it (fresh-open Escape/Tab are live)', async () => {
-    reset();
-    const { editorShowCreateModal } = await import('../src/create.js');
-    editorShowCreateModal();
-    assert.ok(!modal.classList.contains('hidden'), 'modal visible');
-    assert.strictEqual(activeEl, modal, 'focus sits on the dialog root');
+    dispatchKey(dlg, 'Tab', { shift: true });
+    assert.strictEqual(activeEl, cancel, 'Shift+Tab from first wraps to last');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

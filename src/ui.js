@@ -59,6 +59,14 @@ export function _installModalKeyboard(modal, inner, onClose) {
     const FOCUSABLE_SEL = 'a[href], button:not([disabled]),'
         + ' input:not([disabled]), select:not([disabled]),'
         + ' textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    // Not every match is REACHABLE: the selector can't see display:none
+    // (the stem manager's file input sits hidden inside its label, and
+    // dialogs carry hidden sub-panels). The browser's own Tab nav skips
+    // those, so the trap must too — wrapping to an unfocusable element
+    // strands focus. A layout-less stubbed DOM has no rects API and is
+    // taken at its word.
+    const focusables = () => Array.from(inner.querySelectorAll(FOCUSABLE_SEL))
+        .filter((el) => typeof el.getClientRects !== 'function' || el.getClientRects().length);
     // Backdrop must be focusable so click-on-overlay can still receive
     // focus (and we can immediately re-direct it inside) — otherwise
     // the click sends focus to <body>, key events skip the modal
@@ -70,8 +78,7 @@ export function _installModalKeyboard(modal, inner, onClose) {
             // Defer until after the click's default focus change so we
             // win the focus-move race.
             setTimeout(() => {
-                const f = inner.querySelector(FOCUSABLE_SEL);
-                f?.focus();
+                focusables()[0]?.focus();
             }, 0);
         }
     });
@@ -83,7 +90,7 @@ export function _installModalKeyboard(modal, inner, onClose) {
             return;
         }
         if (e.key === 'Tab') {
-            const items = Array.from(inner.querySelectorAll(FOCUSABLE_SEL));
+            const items = focusables();
             if (!items.length) return;
             const first = items[0], last = items[items.length - 1];
             const active = document.activeElement;

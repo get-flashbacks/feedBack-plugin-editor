@@ -234,8 +234,17 @@ export function editorSyncTempo() {
     _syncDialogPrevFocus = document.activeElement;
     if (!_syncDialogKbInstalled) {
         _syncDialogKbInstalled = true;
-        _installModalKeyboard(dlg, dlg.firstElementChild, editorHideSyncDialog);
+        // No wrapping panel: the BPM input and the Apply/Cancel row are
+        // SIBLINGS of the title div, so the trap's inner must be the
+        // dialog itself — bound to firstElementChild it queries only the
+        // title and finds nothing to wrap.
+        _installModalKeyboard(dlg, dlg, editorHideSyncDialog);
     }
+    // Focus the primary control: the helper's listener sits on the dialog
+    // and only sees Escape/Tab once focus is inside it. (Focusing the
+    // dialog root would not trap — inner === dlg reads root focus as
+    // "inside" and Tab would walk out through the siblings' DOM order.)
+    document.getElementById('sync-manual-bpm')?.focus();
     setStatus('Ready');
 }
 

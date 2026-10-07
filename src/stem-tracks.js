@@ -256,6 +256,9 @@ export function editorToggleStemTracks(force) {
         }
         if (!S.sessionId) { setStatus('Open or import a song first.'); modal.classList.add('hidden'); return true; }
         _render();
+        // Move focus into the dialog so Escape/Tab work before the first
+        // click (the command palette blurs to body before this toggle runs).
+        modal.focus();
     } else {
         const prev = _stemTracksPrevFocus;
         _stemTracksPrevFocus = null;

@@ -173,6 +173,9 @@ export function editorShowCreateModal() {
         _createModalKbInstalled = true;
         _installModalKeyboard(modal, modal.firstElementChild, editorHideCreateModal);
     }
+    // Move focus into the dialog so Escape/Tab work before the first click:
+    // the helper's listener sits on the modal and only sees keys from inside.
+    modal.focus();
     hide('editor-create-tracks');
     const go = document.getElementById('editor-create-go'); if (go) go.disabled = true;
     setTxt('editor-create-status');
