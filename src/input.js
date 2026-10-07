@@ -5,7 +5,7 @@
 // the commands refresh in the composition root goes through host.
 
 import { AddAnchorCmd, AddHandshapeCmd, AddToneChangeCmd, RemoveAnchorCmd, RemoveHandshapeCmd, RemoveToneChangeCmd, _anchorLaneTopY, _currentAnchorArr, _currentToneArr, _ensureTones, _handshapeLaneTopY, _readAnchorSnapshot, onAnchorLaneContextMenu, onHandshapeLaneContextMenu, onToneLaneContextMenu } from './annotation-lanes.js';
-import { _editBlipAt, _editorToggleFollow, _editorToggleGuideClap, _editorToggleLoopAB, _editorToggleMetronome, _editorToggleOnsetStrip, _editorToggleScrollInPlay, _editorToggleSnapMode, _ensureOnsetsShifted, editorTogglePlayAllTracks, ensureGuideOnsetsShifted, startPlayback, stopPlayback } from './audio.js';
+import { _editBlipAt, _editorToggleFollow, _editorToggleGuideClap, _editorToggleLoopAB, _editorToggleMetronome, _editorToggleOnsetStrip, _editorToggleScrollInPlay, _editorToggleSnapMode, _ensureOnsetsShifted, editorNudgeTrackOffset, _editorTrackOffsetNudgeStepSec, editorTogglePlayAllTracks, ensureGuideOnsetsShifted, startPlayback, stopPlayback } from './audio.js';
 import { editorSuggestFingers } from './anchor-resolve.js';
 import { _suggestActive, _suggestCompute, _suggestDismiss, _suggestProposals } from './tempo-suggest.js';
 import { _clickSourcePure, _trackSessionSourcesPure } from './track-session.js';
@@ -38,6 +38,7 @@ import { _editorShowTabPreview, _tabPreviewKeyPolicyPure } from './tab-preview.j
 import { editorOpenCommandPalette } from './command-palette.js';
 import { editorToggleTabView } from './tab-view-live.js';
 import { editorExportGp5 } from './gp5-export.js';
+import { trackOffsetTarget } from './region-commands.js';
 import { TempoGridCmd, _editorModulateTempoAtSelection, _editorTapTempoAtSelection, _editorToggleSyncLock, _editorToggleTempoMapMode, _tapTempoHandleKey, _tempoDeleteSelection, _tempoInsertSyncPoint, _tempoMapOnContextMenu, _tempoMeasureBeatCount, _tempoMeasureDenominator, _tempoPromptMeasureBpm, _tempoSetBeatsPerMeasure, _tempoSetDenominatorOnBeatsPure, _tempoPromptPickup, _tempoSelRangePure, editorAcceptWholeTempoFit } from './tempo.js';
 import { beatSecondsAt, findPhraseIndexAt, planTierSimplification, sliceByWindow, windowForPhrase } from './tiers.js';
 import { _tourNoteAction } from './tour.js';
@@ -1887,6 +1888,37 @@ export function onKeyDown(e) {
     // because it routes to editorTogglePlay → editorStopRecordMidi,
     // which cleanly finalizes the take.
     if (_recState === 'recording') return;
+
+    // Per-track offset nudge (issue #42): slide the SELECTED AUDIO track in time
+    // without touching the global shift or any sibling track. This fires BEFORE
+    // the Parts-view read-only guard below — that guard swallows every key
+    // except Shift+A/Delete, which is why the track nudge must be claimed here.
+    // The chord needs no `S.barSel` exclusion: Alt+Shift+arrows is free in the
+    // overview because Shift breaks the Alt+arrow prevNote/nextNote match from
+    // the profile dispatcher, and the loop-edge Alt+arrows handler sits BELOW
+    // the parts-view guard — which returns unconditionally in the overview — so
+    // it can never run here whatever S.barSel holds (a loop region dragged in
+    // note view survives the toggle into the overview). The two never meet, so
+    // the chord never shadows note editing, loop editing or anchor jumps. Fine
+    // = 1 ms; adding Ctrl/Cmd takes the 10 ms step, mirroring the +/-10ms
+    // buttons on the toolbar's Offset box. Each press is one undoable nudge;
+    // holding coalesces into a single undo step (see EditHistory.exec's merge
+    // hook). Surfaced via onKeyDown for now — registering it in the `?` help
+    // panel belongs to the keybinds audit (#10/#38).
+    if (S.partsViewMode && S.selectedTrackId
+        && e.altKey && e.shiftKey
+        && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')
+        && !e.target.matches('input, select, textarea')) {
+        const track = trackOffsetTarget(S.selectedTrackId);
+        if (track) {
+            e.preventDefault();
+            const dir = e.key === 'ArrowRight' ? 1 : -1;
+            const step = _editorTrackOffsetNudgeStepSec(e.ctrlKey || e.metaKey) * dir;
+            editorNudgeTrackOffset(track.id, step);
+            host.draw();
+            return;
+        }
+    }
 
     // Parts view is a read-only overview — technique editing stays in the
     // focus editors. Ignore every note-editing shortcut (fret digits, f,

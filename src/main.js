@@ -44,7 +44,9 @@ import {
     _editBlipAt, _editorToggleGuideClap,
     _editorToggleLoopAB, _editorToggleMetronome, _editorToggleOnsetStrip,
     _editorToggleSnapMode, _mixLoadPct, cancelAudioLoad, editorEditBlipEnabled,
-    editorSetEditBlip, editorSetMixLevel, editorSetAudioShift, editorNudgeAudioShift, initAudio, loadAudio,
+    editorSetEditBlip, editorSetMixLevel, editorSetAudioShift, editorNudgeAudioShift,
+    editorSetTrackOffset, editorNudgeTrackOffset, editorPromptTrackOffset,
+    initAudio, loadAudio,
     startPlayback, stopPlayback, teardownAudio, editorSetCountIn, editorSetAuditionRate,
     editorToggleAuditionTrainer, editorPlayAllTracksEnabled, editorTogglePlayAllTracks,
     _partGainsApply, applyStemMix, audioStemWaveform, syncStemAudio, audioMixerMeterLevels,
@@ -691,6 +693,12 @@ window.editorSaveAs = editorSaveAs;
 // Replace-audio modal (replace-audio.js owns the logic; HTML calls these by name).
 window.editorSetAudioShift = editorSetAudioShift;
 window.editorNudgeAudioShift = editorNudgeAudioShift;
+// Per-track offset UX (issue #42): a numeric prompt for an exact value and a
+// nudge verb for the keyboard path. Both reuse TrackOffsetCmd, so the same
+// undo/redo + coalescing (rapid-repeat merge) applies to either entry point.
+window.editorSetTrackOffset = editorSetTrackOffset;
+window.editorNudgeTrackOffset = editorNudgeTrackOffset;
+window.editorPromptTrackOffset = editorPromptTrackOffset;
 window.editorSetAuditionRate = editorSetAuditionRate;
 window.editorToggleAuditionTrainer = editorToggleAuditionTrainer;
 // Slide the recording in time to line it up with the chart (audio moves, chart
