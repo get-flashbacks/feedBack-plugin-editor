@@ -20,7 +20,7 @@
 // Browser surface: WebAudio (AudioContext), `canvas` (for waveform width),
 // ════════════════════════════════════════════════════════════════════
 import { timeOf } from './beats.js';
-import { _placementSecPure, _trackPlacementPure, _trackRegionsResolvePure } from './region.js';
+import { _placementSecPure, _trackPlacementPure, _trackRegionsResolvePure, _audioTrackEndsPure } from './region.js';
 import { TrackOffsetCmd, trackOffsetTarget } from './region-commands.js';
 import { DPR, canvas } from './canvas.js';
 import { LABEL_W, timeToX } from './geometry.js';
@@ -601,8 +601,40 @@ export function _audioTimelineDurationPure(timelineDuration, audioShift, bufferD
 }
 /* @pure:audio-shift:end */
 
-function _audioTimelineDuration() {
-    return _audioTimelineDurationPure(S.duration, S.audioShift, S.masterAudioDuration || S.duration);
+// The furthest any audio track's content reaches in chart seconds: the max over
+// every audio row of (its composed placement + its source's decoded buffer
+// length). This folds the per-track `offsetSec` (and the per-stem one) into the
+// timeline bound so a track nudged past the master's end stays reachable — the
+// scroll clamp (_editorClampScrollX) and the playback tail (_audioTimelineDuration)
+// both read it. The master is always present (it is S.audioBuffer), so a nudged
+// master track is bounded immediately; a stem is bounded once its buffer decodes
+// (the cache the scheduler already keys by source id).
+//
+// Cheap enough to run on-demand: the walk is O(tracks) with Map lookups, and a
+// song's Tracks column is in the low dozens — well under a microsecond. No cached
+// "furthest end" field is kept on state, which keeps it correct through undo/redo
+// for free (it is derived from the live tree, not a shadow value).
+function _maxAudioTrackEnd() {
+    const rows = S.trackSession && Array.isArray(S.trackSession.tracks) ? S.trackSession.tracks : null;
+    if (!rows || !rows.length) return 0;
+    const sources = _liveAudioSources();
+    const durations = new Map();
+    const masterDur = (S.masterAudioDuration || (S.audioBuffer && S.audioBuffer.duration) || 0);
+    if (masterDur > 0) durations.set(MASTER_SOURCE_ID, masterDur);
+    for (const [sourceId, cached] of stemAudioCache) {
+        const buf = cached && cached.buffer;
+        const d = buf ? buf.duration : 0;
+        if (Number.isFinite(d) && d > 0) durations.set(sourceId, d);
+    }
+    return _audioTrackEndsPure(S.audioShift, rows, sources, durations);
+}
+
+export function _audioTimelineDuration() {
+    // The global-shift form is the floor (chart duration + the master buffer);
+    // the per-track walk extends it when a track's own offset — or a stem's —
+    // pushes past the master's tail. max() makes a nudged-0 master a no-op.
+    const base = _audioTimelineDurationPure(S.duration, S.audioShift, S.masterAudioDuration || S.duration);
+    return Math.max(base, _maxAudioTrackEnd());
 }
 
 // ── Audition speed (design slice 5): pitch-preserving slow practice ──────────

@@ -188,6 +188,42 @@ export function _trackPlacementPure(audioShift, sourceOffset, trackOffset) {
     return Number.isFinite(sum) ? sum : 0;
 }
 
+/* @pure:audio-track-ends:start */
+// The furthest chart-second an AUDIO track's content can reach: its composed
+// placement (the SAME three-term sum `_trackPlacementPure`) plus its source's
+// decoded buffer length, maximized across every audio row.
+//
+// This is what lets the timeline bound — and so the scroll clamp and the
+// playback tail — follow a track nudged past the master's end, instead of
+// always reading the global `audioShift` alone (the gap #48 tracks). Negative
+// placements crop the front but, matching `_audioTimelineDurationPure`'s
+// rule, never shrink the bound below the source's own length.
+//
+// `sourceDurations` is a Map<sourceId, bufferSeconds> (or a plain object) of
+// every DECODED source's length; a source that has not decoded yet contributes
+// 0 — the master always has (it is S.audioBuffer), so a nudged master track is
+// always bounded, and a stem is bounded once its buffer is decoded.
+export function _audioTrackEndsPure(audioShift, rows, sources, sourceDurations) {
+    const durById = sourceDurations instanceof Map
+        ? sourceDurations
+        : new Map(Object.entries(sourceDurations || {}));
+    const srcById = new Map((Array.isArray(sources) ? sources : [])
+        .map((s) => [s && s.id, s]));
+    let max = 0;
+    for (const track of (Array.isArray(rows) ? rows : [])) {
+        if (!track || track.type !== 'audio') continue;
+        const src = srcById.get(track.sourceId);
+        const sourceOffset = src ? _placementSecPure(src.offset) : 0;
+        const placement = _trackPlacementPure(audioShift, sourceOffset, _placementSecPure(track.offsetSec));
+        const dur = _placementSecPure(durById.get(track.sourceId));
+        if (!(dur > 0)) continue;             // an un-decoded source contributes no length
+        const end = dur + Math.max(0, placement);
+        if (Number.isFinite(end) && end > max) max = end;
+    }
+    return max;
+}
+/* @pure:audio-track-ends:end */
+
 // ── Layout (for drawing a region as a block on a track lane) ──────────
 
 // The region's TIME span on the timeline, given its lane's content extent

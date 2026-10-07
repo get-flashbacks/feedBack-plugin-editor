@@ -19,7 +19,7 @@
 // Browser surface: the loop strip and its controls.
 // ════════════════════════════════════════════════════════════════════
 import {
-    _abApplyRefGain, _abDisarm, _abOn, _audioTimelineDurationPure, _composeSongDuration,
+    _abApplyRefGain, _abDisarm, _abOn, _audioTimelineDuration, _composeSongDuration,
     _ensureOnsetsShifted, _nearestOnsetTimePure, _refreshLoopABBtn, _trainerDisarm,
 } from './audio.js';
 import { beatOf, timeOf } from './beats.js';
@@ -39,12 +39,14 @@ export function _editorViewportDuration() {
 }
 
 export function _editorClampScrollX(scrollX) {
-    // Deliberately GLOBAL-only: the scroll bound exists so a positive global
-    // shift can't push the recording's tail out of reach, and it has always
-    // ignored the per-source offset. A per-track offset past the chart end is
-    // not covered — folding the term in would mean a max-over-all-tracks walk on
-    // every scroll clamp; that is a follow-up, not a silent omission.
-    let duration = _audioTimelineDurationPure(S.duration, S.audioShift, S.audioBuffer && S.audioBuffer.duration);
+    // The timeline bound is the furthest any audio track's content reaches — the
+    // global audioShift, a source's own offset, and a track's offsetSec all fold
+    // in via _audioTimelineDuration() (a max-over-audio-rows walk over
+    // _trackPlacementPure). A track nudged past the chart end therefore stays
+    // scrollable AND audible (the playback tail reads the same duration). Cheap:
+    // the walk is O(tracks); no cached bound is kept on state, so undo/redo
+    // stays correct by construction.
+    let duration = _audioTimelineDuration();
     // Compose/MIDI-only sessions have no audio to bound the timeline, and
     // S.duration is only derived from the grid inside startPlayback() — so
     // before the first Play the audio-derived duration here is 0, maxScroll

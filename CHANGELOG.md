@@ -201,6 +201,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A per-track audio offset now extends the timeline bound and scroll reach.**
+  The two duration sites — `_audioTimelineDuration()` (playback cursor clamp and
+  loop-restart) and `_editorClampScrollX()` (the scroll bound the minimap, wheel,
+  pan and region-drag funnel through) — read only the global `audioShift`, so a
+  track nudged forward past the master's end was drawn off-screen and its tail was
+  cut off at the original chart end (#41 made the offset reachable from the
+  keyboard, which is exactly when this bites). They now both fold the per-track
+  term in via a max-over-audio-rows walk over `_trackPlacementPure`
+  (`_audioTrackEndsPure` in `src/region.js`, consuming the master's decoded
+  buffer plus each decoded stem's, so an un-decoded stem contributes nothing and
+  the old master-only bound is reproduced when nothing is nudged). No cached
+  "furthest end" is kept on state, so undo/redo stays correct by construction;
+  the compose/MIDI-only fallback (`_composeSongDuration`) and the audio-bounded
+  guard in `_editorClampScrollX` are untouched.
+
 - **The DPR watcher is disposed when the editor screen is torn down.** The
   monitor-move / browser-zoom refresh (`matchMedia('(resolution: …)')`, the
   improvement plan's P0.5) lives on `window`, outside the tracked listener
