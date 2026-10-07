@@ -119,6 +119,7 @@ t('exposes wired FeedBack Native key labels', () => {
     assert.strictEqual(rows.find(r => r.id === 'save').key, 'Ctrl+S');
     assert.strictEqual(rows.find(r => r.id === 'prevNote').key, 'Alt+Left');
     assert.strictEqual(rows.find(r => r.id === 'toggleWaveform').key, 'W');
+    assert.strictEqual(rows.find(r => r.id === 'togglePlay').key, 'Space');
     assert.strictEqual(rows.find(r => r.id === 'showShortcutHelp').key, '?');
     assert.strictEqual(rows.find(r => r.id === 'openCommandPalette').key, 'Ctrl+K');
     assert.strictEqual(rows.find(r => r.id === 'setFretDigit').key, '0-9');
@@ -142,10 +143,19 @@ t('exposes wired FeedBack Native key labels', () => {
     assert.strictEqual(rows.find(r => r.id === 'tempoInsertSync').key, 'I (Tempo Map)');
     assert.strictEqual(rows.find(r => r.id === 'tempoTapBpm').key, 'Shift+B (Tempo Map)');
     assert.strictEqual(rows.find(r => r.id === 'tempoFullDialog').key, 'Alt+T (Tempo Map)');
+    // Track offset nudge (context-dependent, shown in registry)
+    assert.strictEqual(rows.find(r => r.id === 'nudgeTrackOffsetLeft').key, 'Alt+Shift+Left');
+    assert.strictEqual(rows.find(r => r.id === 'nudgeTrackOffsetRight').key, 'Alt+Shift+Right');
+    // Loop nudge (context-dependent, shown in registry)
+    assert.strictEqual(rows.find(r => r.id === 'nudgeLoopStartLeft').key, 'Alt+Left');
+    assert.strictEqual(rows.find(r => r.id === 'nudgeLoopStartRight').key, 'Alt+Right');
+    assert.strictEqual(rows.find(r => r.id === 'nudgeLoopEndLeft').key, 'Alt+Shift+Left');
+    assert.strictEqual(rows.find(r => r.id === 'nudgeLoopEndRight').key, 'Alt+Shift+Right');
 });
 
 t('maps FeedBack Native timeline and grid shortcuts', () => {
     assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('w')), 'toggleWaveform');
+    assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev(' ')), 'togglePlay');
     assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('?', { shift: true })), 'showShortcutHelp');
     assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('k', { ctrl: true })), 'openCommandPalette');
     assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('g')), 'toggleSnap');
@@ -153,6 +163,11 @@ t('maps FeedBack Native timeline and grid shortcuts', () => {
     assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('ArrowRight', { alt: true })), 'nextNote');
     assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('PageDown', { ctrl: true })), 'nextGrid');
     assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('ArrowLeft', { ctrl: true, alt: true })), 'prevAnchor');
+    // Track offset nudge (context-dependent: only in Parts view with Alt+Shift)
+    assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('ArrowLeft', { alt: true, shift: true })), 'nudgeTrackOffsetLeft');
+    assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('ArrowRight', { alt: true, shift: true })), 'nudgeTrackOffsetRight');
+    // Loop nudge (Alt+Left/Right) is context-dependent (requires S.barSel);
+    // resolver returns prevNote/nextNote as default, onKeyDown overrides when loop exists.
 });
 
 t('maps FeedBack Native note and technique shortcuts', () => {
@@ -230,6 +245,8 @@ t('maps EOF Tempo Map commands by active mode', () => {
 t('EOF port: help, select-like, fret aliases, and numpad bookmarks land', () => {
     // F1 = Help (EOF), beside the universal '?'.
     assert.strictEqual(api._editorEofCommandForKeyPure(ev('F1')), 'showShortcutHelp');
+    // Spacebar = play/pause (EOF)
+    assert.strictEqual(api._editorEofCommandForKeyPure(ev(' ')), 'togglePlay');
     // Shift+L = precise select-like → our one select-matching command; follow
     // has no EOF key (EOF just auto-scrolls) and is button/View-menu only there.
     assert.strictEqual(api._editorEofCommandForKeyPure(ev('l', { shift: true })), 'selectLike');

@@ -686,6 +686,23 @@ function _editorNudgeSelectionTime(dir) {
     return true;
 }
 
+function _editorNudgeTrackOffset(dir) {
+    if (!S.partsViewMode || !S.selectedTrackId) return false;
+    const track = trackOffsetTarget(S.selectedTrackId);
+    if (!track) return false;
+    const step = _editorTrackOffsetNudgeStepSec(false) * dir;
+    editorNudgeTrackOffset(track.id, step);
+    host.draw();
+    return true;
+}
+
+function _editorNudgeLoopEdge(edge, dir) {
+    if (!S.barSel) return false;
+    _loopNudgeEdge(edge, dir, false);
+    host.draw();
+    return true;
+}
+
 /* @pure:resnap-edges:start */
 // Both EDGES of every note snap to the current-subdivision guidelines — the
 // Logic piano-roll model: the start edge quantises to its nearest guideline,
@@ -1389,6 +1406,7 @@ export function _editorRunEofCommand(cmd) {
     case 'manageStemTracks': return editorToggleStemTracks();
     case 'soloMyStem': return editorSoloMyStem();
     case 'toggleLoopAB': return _editorToggleLoopAB();
+    case 'togglePlay': return window.editorTogglePlay();
     case 'toggleLoopRegion': return editorToggleLoopRegion();
     case 'songFit': _editorSongFit(); return true;
     case 'toggleOnsetStrip': return _editorToggleOnsetStrip();
@@ -1415,6 +1433,12 @@ export function _editorRunEofCommand(cmd) {
     case 'nextNote': _editorJumpNote(+1); return true;
     case 'nudgeTimeLeft': return _editorNudgeSelectionTime(-1);
     case 'nudgeTimeRight': return _editorNudgeSelectionTime(+1);
+    case 'nudgeTrackOffsetLeft': return _editorNudgeTrackOffset(-1);
+    case 'nudgeTrackOffsetRight': return _editorNudgeTrackOffset(+1);
+    case 'nudgeLoopStartLeft': return _editorNudgeLoopEdge('start', -1);
+    case 'nudgeLoopStartRight': return _editorNudgeLoopEdge('start', +1);
+    case 'nudgeLoopEndLeft': return _editorNudgeLoopEdge('end', -1);
+    case 'nudgeLoopEndRight': return _editorNudgeLoopEdge('end', +1);
     case 'prevGrid': _editorJumpGrid(-1); return true;
     case 'nextGrid': _editorJumpGrid(+1); return true;
     case 'prevAnchor': _editorJumpAnchor(-1); return true;
@@ -1875,10 +1899,11 @@ export function onKeyDown(e) {
     }
     if (selectAllPolicy === 'text') return;
 
+    // Spacebar: play/pause (also stops recording). Handled via registry so it
+    // appears in the shortcut help and respects profile bindings.
     if (e.key === ' ' && !e.target.matches('input, select, textarea')) {
         e.preventDefault();
-        window.editorTogglePlay();
-        return;
+        return _editorRunEofCommand('togglePlay');
     }
 
     // Block all mutating shortcuts while a take is active so mid-take
