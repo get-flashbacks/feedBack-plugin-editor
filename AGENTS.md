@@ -8,7 +8,7 @@ MIDI + XML + sync sidecars), chart notes on a beat-primary tempo map, mix, save,
 
 ```bash
 npm test                              # node --test — globs tests/*.test.{js,mjs}
-node --test tests/loop_ab.test.mjs    # a single JS suite (fast, headless)
+node --test tests/loop_ab.test.js    # a single JS suite (fast, headless)
 npm run lint                          # npx --yes eslint@9.39.4 src tests
 python -m pytest                      # backend suites in tests/test_*.py
 ```
