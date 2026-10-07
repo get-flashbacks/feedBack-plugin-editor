@@ -6,10 +6,12 @@
 import { _ensureOnsetsShifted } from './audio.js';
 import { S } from './state.js';
 import { TempoMapCmd, _respaceWithLocksPure, _tempoPivotTimePure } from './tempo.js';
-import { setStatus } from './ui.js';
+import { _installModalKeyboard, setStatus } from './ui.js';
 import { host } from './host.js';
 
 let syncState = { tabBPM: 0, audioBPM: 0 };
+let _syncDialogPrevFocus = null;
+let _syncDialogKbInstalled = false;
 
 /* @pure:detect-onsets:start */
 // Tempo + downbeat phase from the ONSET STRIP (D3): the strip (audio.js,
@@ -229,6 +231,11 @@ export function editorSyncTempo() {
     dlg.style.left = rect.left + 'px';
     dlg.style.top = (rect.bottom + 4) + 'px';
     dlg.classList.remove('hidden');
+    _syncDialogPrevFocus = document.activeElement;
+    if (!_syncDialogKbInstalled) {
+        _syncDialogKbInstalled = true;
+        _installModalKeyboard(dlg, dlg.firstElementChild, editorHideSyncDialog);
+    }
     setStatus('Ready');
 }
 
@@ -246,6 +253,9 @@ export function editorSyncUpdateFactor() {
 
 export function editorHideSyncDialog() {
     document.getElementById('editor-sync-dialog').classList.add('hidden');
+    const prev = _syncDialogPrevFocus;
+    _syncDialogPrevFocus = null;
+    if (prev && prev.isConnected && prev.focus) prev.focus();
 }
 
 export function editorApplySync() {

@@ -24,7 +24,7 @@
 
 import { S, markSessionDirty } from './state.js';
 import { host } from './host.js';
-import { setStatus, _editorPromptText } from './ui.js';
+import { setStatus, _editorPromptText, _installModalKeyboard } from './ui.js';
 import { _partViewKeyPure } from './keys.js';
 import { isDrumArrangement } from './drum-arrangement.js';
 import { editorTempoGuideState, editorToggleTempoGuide, reconcileTempoGuideToStems } from './track-session.js';
@@ -240,14 +240,26 @@ function _onImportPicked(e) {
     })();
 }
 
+let _stemTracksPrevFocus = null;
+let _stemTracksKbInstalled = false;
+
 export function editorToggleStemTracks(force) {
     const modal = $modal();
     if (!modal) return false;
     const show = force === undefined ? modal.classList.contains('hidden') : !!force;
     modal.classList.toggle('hidden', !show);
     if (show) {
+        _stemTracksPrevFocus = document.activeElement;
+        if (!_stemTracksKbInstalled) {
+            _stemTracksKbInstalled = true;
+            _installModalKeyboard(modal, modal.firstElementChild, () => editorToggleStemTracks(false));
+        }
         if (!S.sessionId) { setStatus('Open or import a song first.'); modal.classList.add('hidden'); return true; }
         _render();
+    } else {
+        const prev = _stemTracksPrevFocus;
+        _stemTracksPrevFocus = null;
+        if (prev && prev.isConnected && prev.focus) prev.focus();
     }
     return true;
 }
@@ -303,7 +315,7 @@ export function initStemTracks() {
     if (!modal) return;
     modal.addEventListener('click', (e) => {
         if (e.target instanceof Element && e.target.id === 'editor-stem-tracks-close') {
-            modal.classList.add('hidden');
+            editorToggleStemTracks(false);   // shared close: restores opener focus
             return;
         }
         _onListClick(e);

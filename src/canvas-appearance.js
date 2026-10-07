@@ -16,6 +16,7 @@
 // cached per settings generation, so the per-frame cost is a map lookup.
 
 import { host } from './host.js';
+import { _installModalKeyboard } from './ui.js';
 
 /* @pure:canvas-appearance:start */
 // Slider ranges. 100 = the shipped default palette. Grid strength runs past
@@ -215,6 +216,7 @@ function _syncDialog() {
 }
 
 let _prevFocus = null;   // element to restore focus to on close
+let _canvasAppKbInstalled = false;
 
 if (typeof window !== 'undefined') {
     window.editorShowCanvasAppearance = function () {
@@ -224,6 +226,10 @@ if (typeof window !== 'undefined') {
         modal.classList.remove('hidden');
         // Move focus into the dialog (first slider) and remember who had it.
         _prevFocus = document.activeElement;
+        if (!_canvasAppKbInstalled) {
+            _canvasAppKbInstalled = true;
+            _installModalKeyboard(modal, modal.firstElementChild, window.editorHideCanvasAppearance);
+        }
         document.getElementById('editor-canvas-app-grid')?.focus();
     };
 

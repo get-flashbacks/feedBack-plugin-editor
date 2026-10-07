@@ -388,9 +388,17 @@ export async function loadCDLC(filename, options = {}) {
 // Load modal
 // ════════════════════════════════════════════════════════════════════
 
+let _loadModalKbInstalled = false;
+let _loadModalPrevFocus = null;
+
 export async function showLoadModal() {
     const modal = document.getElementById('editor-load-modal');
     modal.classList.remove('hidden');
+    _loadModalPrevFocus = document.activeElement;
+    if (!_loadModalKbInstalled) {
+        _loadModalKbInstalled = true;
+        _installModalKeyboard(modal, modal.firstElementChild, hideLoadModal);
+    }
     const search = document.getElementById('editor-load-search');
     if (search) search.value = '';
 
@@ -407,6 +415,13 @@ export async function showLoadModal() {
     // Open as a file browser rooted at the DLC / song-library folder.
     await _editorBrowse('');
     if (search) search.focus();
+}
+
+export function hideLoadModal() {
+    document.getElementById('editor-load-modal').classList.add('hidden');
+    const prev = _loadModalPrevFocus;
+    _loadModalPrevFocus = null;
+    if (prev && prev.isConnected && prev.focus) prev.focus();
 }
 
 // Fetch + render one directory level of the library. `path` is a DLC-relative
