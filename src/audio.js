@@ -43,7 +43,7 @@ import {
     _composeSongDurationPure, _cursorDrawTimePure, _loopPlaybackRestartTimePure,
     _normalizeLoopRegionPure, _countInPlanPure, _transportChartTimePure,
 } from './transport.js';
-import { setStatus } from './ui.js';
+import { setStatus, _editorPromptText } from './ui.js';
 
 // The rAF handle for the playback loop. Module-scope so playbackTick and
 // teardownAudio share it; main.js reaches the cancel through teardownAudio().
@@ -940,6 +940,17 @@ export function editorNudgeAudioShift(delta) {
     editorSetAudioShift((Number(S.audioShift) || 0) + (Number(delta) || 0));
 }
 
+// Nudge step sizes (seconds) for the per-track offset keyboard nudges. Fine
+// (Alt+Shift+arrows) matches the 1 ms resolution the offset verb itself uses;
+// coarse (Ctrl+Alt+Shift+arrows) mirrors the +/-10ms buttons on the toolbar's
+// global Offset box — small enough for alignment work, big enough to span a
+// typical timing slip without 10 keypresses.
+export const TRACK_OFFSET_NUDGE_FINE_SEC = 0.001;
+export const TRACK_OFFSET_NUDGE_COARSE_SEC = 0.010;
+export function _editorTrackOffsetNudgeStepSec(coarse) {
+    return coarse ? TRACK_OFFSET_NUDGE_COARSE_SEC : TRACK_OFFSET_NUDGE_FINE_SEC;
+}
+
 // Verb: set ONE track's placement offset (seconds, 1 ms resolution), undoably
 // and independently of the global shift. The track's placement is the sum of
 // audioShift + the source's own offset + this offset (src/region.js), so moving
@@ -947,7 +958,11 @@ export function editorNudgeAudioShift(delta) {
 // were. TrackOffsetCmd is the container-only command; the audio reaction
 // (re-seat a live source, redraw the shifted lane) rides `afterApply` so it also
 // fires on UNDO and REDO, which reach the command without passing through here.
-export function editorSetTrackOffset(trackId, val) {
+//
+// `opts.coalesce` is OFF by default — an explicit `set` (the numeric prompt) is
+// a single discrete step — and ON for editorNudgeTrackOffset so holding the
+// nudge key scrolls one undo entry (see EditHistory.exec's merge hook).
+export function editorSetTrackOffset(trackId, val, opts = {}) {
     const track = trackOffsetTarget(trackId);
     if (!track) return false;
     // A value that isn't a number is a REFUSAL, never a silent zero: `parseFloat
@@ -962,19 +977,43 @@ export function editorSetTrackOffset(trackId, val) {
     const cur = _placementSecPure(track.offsetSec);
     if (Math.abs(next - cur) < 1e-4) return false;
     const cmd = new TrackOffsetCmd({ trackId, oldSec: cur, newSec: next });
+    cmd.coalesce = !!opts.coalesce;
     cmd.afterApply = _afterAudioShiftChange;
     S.history.exec(cmd);
     const ms = Math.round(next * 1000);
     setStatus(`Track offset ${ms >= 0 ? '+' : ''}${ms}ms — ${track.name || 'this track'} moved; every other track and the global shift unchanged.`);
     return true;
 }
-export function editorNudgeTrackOffset(trackId, delta) {
+export function editorNudgeTrackOffset(trackId, delta, opts = {}) {
     const track = trackOffsetTarget(trackId);
     if (!track) return false;
     const d = typeof delta === 'number' ? delta : parseFloat(delta);
     if (!Number.isFinite(d)) return false;
-    return editorSetTrackOffset(trackId, _placementSecPure(track.offsetSec) + d);
+    // Default the nudge to coalesce (rapid repeats collapse to one step) but
+    // let a caller opt out if it wants a guaranteed fresh undo entry.
+    return editorSetTrackOffset(trackId, _placementSecPure(track.offsetSec) + d, { coalesce: true, ...opts });
 }
+
+// Numeric input for ONE track's offset, mirroring editorPromptAudioShift: the
+// box is prefilled with the current offset (seconds), +ve slides the track
+// later relative to the others, and Escape/Cancel leaves it untouched. The
+// typed string is funneled through editorSetTrackOffset so the same 1 ms
+// resolution, no-op guard and anti-garbage boundary apply — and it is a single
+// undoable step (not a nudge, so coalesce stays off).
+export async function editorPromptTrackOffset(trackId) {
+    const track = trackOffsetTarget(trackId);
+    if (!track) return false;
+    const cur = _placementSecPure(track.offsetSec);
+    const raw = await _editorPromptText({
+        title: 'Track offset',
+        label: `${track.name || 'this track'} — slide this track in time (seconds; + = later, − = earlier). Every other track and the global shift stay put.`,
+        value: cur ? String(cur) : '',
+        placeholder: 'e.g. 0.020 or -0.050',
+    });
+    if (raw === null) return false;
+    return editorSetTrackOffset(trackId, raw);
+}
+
 
 // Anchor the transport clock at the current cursor: pin wall-time to the
 // AudioContext clock and chart-time to cursorTime, so playbackTick can derive

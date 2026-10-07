@@ -485,8 +485,33 @@ export class TrackOffsetCmd {
         this.pitchPreserving = true;
         this.songScope = true;
         this._before = { taken: false, hadKey: false, value: undefined };
+        // Opt-in coalescing. Only the keyboard nudge verb (editorNudgeTrackOffset)
+        // flips this on — an explicit `set` (numeric prompt) stays a discrete step
+        // so a typed value never silently absorbs the nudge you hold right after.
+        this.coalesce = false;
         // Assigned by the caller (src/audio.js): () => _afterAudioShiftChange().
         this.afterApply = null;
+    }
+
+    // Fold a consecutive nudge on the SAME track into this command. EditHistory
+    // only calls this inside an unbroken run (redo stack empty, both commands
+    // `coalesce`), so holding an arrow key scrolls one undo step instead of one
+    // per keystroke. We keep THIS command's original `_before` snapshot so
+    // rollback still restores the chain's true origin — only `newSec` advances,
+    // and the new placement is written directly (NOT via exec(), which would
+    // re-snapshot `_before` and let rollback restore the post-merge value
+    // instead of the pre-nudge original).
+    merge(next) {
+        if (!next || next.trackId !== this.trackId) return false;
+        if (typeof this.newSec !== 'number' || typeof next.newSec !== 'number') return false;
+        if (!Number.isFinite(this.newSec) || !Number.isFinite(next.newSec)) return false;
+        if (this.newSec === next.newSec) return false;
+        this.newSec = next.newSec;
+        const track = trackOffsetTarget(this.trackId);
+        if (!track) return false;
+        if (this.newSec) track.offsetSec = this.newSec; else delete track.offsetSec;
+        if (typeof this.afterApply === 'function') this.afterApply();
+        return true;
     }
 
     exec() {

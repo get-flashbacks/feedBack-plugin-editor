@@ -55,6 +55,25 @@ export class EditHistory {
 
     exec(cmd) {
         if (_locked(cmd)) return;
+        // Coalesce live repeats of the same nudge (holding an arrow key, repeating
+        // a nudge hot-step) into the previous undo entry instead of one step per
+        // keystroke. The contract is opt-in and conservative: a command opts in by
+        // setting `coalesce` AND supplying a `merge(next)` that folds `next` into
+        // itself; exec() only calls merge when the previous entry is a live,
+        // un-cleared nudge of the same kind. The `!this.redo.length` guard is the
+        // "unbroken run" clause — any undo/redo between two nudges puts the undone
+        // command on the redo stack, breaking the chain so the next nudge starts a
+        // FRESH step (Ctrl+Z therefore never lands mid-merge and can't resurrect a
+        // half-absorbed delta). Commands with no `merge` (every non-nudge today)
+        // fall straight through to the normal exec/push path unchanged.
+        if (this.undo.length && !this.redo.length && cmd.coalesce && typeof cmd.merge === 'function') {
+            const prev = this.undo[this.undo.length - 1];
+            if (prev && prev.coalesce && prev.merge(cmd)) {
+                this._afterEdit(cmd);
+                this._ui();
+                return;
+            }
+        }
         // Tag each command with the arrangement it was executed against: most
         // commands resolve their target through the notes()/chords() accessors
         // at rollback time, so an undo issued after switching arrangements
