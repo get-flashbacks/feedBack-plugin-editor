@@ -506,9 +506,12 @@ export class TrackOffsetCmd {
         if (typeof this.newSec !== 'number' || typeof next.newSec !== 'number') return false;
         if (!Number.isFinite(this.newSec) || !Number.isFinite(next.newSec)) return false;
         if (this.newSec === next.newSec) return false;
-        this.newSec = next.newSec;
+        // Resolve the track BEFORE advancing newSec: a refused merge must
+        // leave this stack entry exactly as it was, never holding a newSec
+        // the write never applied.
         const track = trackOffsetTarget(this.trackId);
         if (!track) return false;
+        this.newSec = next.newSec;
         if (this.newSec) track.offsetSec = this.newSec; else delete track.offsetSec;
         if (typeof this.afterApply === 'function') this.afterApply();
         return true;

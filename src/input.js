@@ -1893,16 +1893,19 @@ export function onKeyDown(e) {
     // without touching the global shift or any sibling track. This fires BEFORE
     // the Parts-view read-only guard below — that guard swallows every key
     // except Shift+A/Delete, which is why the track nudge must be claimed here.
-    // Alt+Shift+arrows is free here: in the overview S.barSel is null (so the
-    // loop-edge Alt+arrows above never match), and Shift breaks the Alt+arrow
-    // prevNote/nextNote match from the profile dispatcher — so the chord never
-    // shadows note editing, loop editing or anchor jumps. Fine = 1 ms; adding
-    // Ctrl/Cmd takes the 10 ms step, mirroring the +/-10ms buttons on the
-    // toolbar's Offset box. Each press is one undoable nudge; holding coalesces
-    // into a single undo step (see EditHistory.exec's merge hook). Surfaced via
-    // onKeyDown for now — registering it in the `?` help panel belongs to the
-    // keybinds audit (#10/#38).
-    if (S.partsViewMode && !S.barSel && S.selectedTrackId
+    // The chord needs no `S.barSel` exclusion: Alt+Shift+arrows is free in the
+    // overview because Shift breaks the Alt+arrow prevNote/nextNote match from
+    // the profile dispatcher, and the loop-edge Alt+arrows handler sits BELOW
+    // the parts-view guard — which returns unconditionally in the overview — so
+    // it can never run here whatever S.barSel holds (a loop region dragged in
+    // note view survives the toggle into the overview). The two never meet, so
+    // the chord never shadows note editing, loop editing or anchor jumps. Fine
+    // = 1 ms; adding Ctrl/Cmd takes the 10 ms step, mirroring the +/-10ms
+    // buttons on the toolbar's Offset box. Each press is one undoable nudge;
+    // holding coalesces into a single undo step (see EditHistory.exec's merge
+    // hook). Surfaced via onKeyDown for now — registering it in the `?` help
+    // panel belongs to the keybinds audit (#10/#38).
+    if (S.partsViewMode && S.selectedTrackId
         && e.altKey && e.shiftKey
         && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')
         && !e.target.matches('input, select, textarea')) {

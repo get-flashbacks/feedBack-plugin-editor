@@ -9,8 +9,9 @@
  *   2. The UndoHistory coalescing rule — the headline ask of #42 is "holding or
  *      repeating a nudge does NOT produce dozens of undo entries." EditHistory
  *      only merges an unbroken run of live nudges on the SAME target; an undone
- *      stack (redo non-empty), an explicit set, or a nudge on another track
- *      breaks the chain. This is opt-in (TrackOffsetCmd.coalesce + merge).
+ *      stack (redo non-empty), a redo-restored step (doUndo cleared its
+ *      `coalesce`), an explicit set, or a nudge on another track breaks the
+ *      chain. This is opt-in (TrackOffsetCmd.coalesce + merge).
  *   3. Isolation — a nudge moves only its own track and never the global shift.
  *   4. The merge path keeps THIS command's original rollback snapshot (it does
  *      NOT re-run exec(), which would corrupt rollback), so undo restores the
@@ -147,6 +148,33 @@ t('undo BETWEEN nudges breaks the run (the redo stack is the run-breaker)', () =
     assert.strictEqual(S.history.undo.length, 1, 'a nudge after undo starts a new step, not a merge');
     assert.ok(near(track('audio:Guitar_L').offsetSec, 0.001));
     assert.strictEqual(S.history.redo.length, 0, 'the fresh nudge cleared the redo stack');
+});
+
+t('undo → REDO also breaks the run — a redo-restored step is never re-opened', () => {
+    seed();
+    editorNudgeTrackOffset('audio:Guitar_L', TRACK_OFFSET_NUDGE_FINE_SEC);  // step 1
+    editorNudgeTrackOffset('audio:Guitar_L', TRACK_OFFSET_NUDGE_FINE_SEC);  // merge -> step 1 (0.002)
+    assert.strictEqual(S.history.undo.length, 1);
+    S.history.doUndo();
+    S.history.doRedo();                                                     // redo stack empty again
+    assert.strictEqual(S.history.undo.length, 1);
+    editorNudgeTrackOffset('audio:Guitar_L', TRACK_OFFSET_NUDGE_FINE_SEC);  // must NOT re-merge
+    assert.strictEqual(S.history.undo.length, 2, 'a nudge after undo→redo starts a fresh step');
+    assert.ok(near(track('audio:Guitar_L').offsetSec, 0.003), 'all three deltas applied');
+    S.history.doUndo();
+    assert.ok(near(track('audio:Guitar_L').offsetSec, 0.002),
+        'undo lands on the redo-restored state — never past it');
+    S.history.doUndo();
+    assert.ok(!('offsetSec' in track('audio:Guitar_L')), 'the pre-undo run still rolls back to its origin (no key)');
+});
+
+t('merge refuses WITHOUT mutating newSec when the target track is gone', () => {
+    seed();
+    const orphan = new TrackOffsetCmd({ trackId: 'audio:deleted', oldSec: 0, newSec: 0.001 });
+    orphan.coalesce = true;
+    const next = new TrackOffsetCmd({ trackId: 'audio:deleted', oldSec: 0.001, newSec: 0.002 });
+    assert.strictEqual(orphan.merge(next), false, 'no track to write to');
+    assert.strictEqual(orphan.newSec, 0.001, 'a refused merge leaves the stack entry as it was');
 });
 
 t('two explicit sets are TWO steps (coalesce stays off for the typed-value verb)', () => {

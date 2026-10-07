@@ -1011,7 +1011,17 @@ export async function editorPromptTrackOffset(trackId) {
         placeholder: 'e.g. 0.020 or -0.050',
     });
     if (raw === null) return false;
-    return editorSetTrackOffset(trackId, raw);
+    const n = typeof raw === 'number' ? raw : parseFloat(raw);
+    if (editorSetTrackOffset(trackId, raw)) return true;
+    // A refusal must read as one — a box that closes with no feedback looks
+    // dead. Mirror the ramp prompt's refusal status (src/tempo.js
+    // editorRampRange) and name the boundary that refused: unparseable input,
+    // or a value that rounds to what the track already has (the verb's
+    // sub-millisecond no-op guard).
+    setStatus(Number.isFinite(n)
+        ? `Track offset unchanged — ${track.name || 'this track'} is already at that value.`
+        : 'Enter a track offset in seconds (e.g. 0.020 or -0.050) — nothing was changed.');
+    return false;
 }
 
 

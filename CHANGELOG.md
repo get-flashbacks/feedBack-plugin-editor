@@ -95,17 +95,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The per-track offset had data model + verbs but no way to set it precisely. Added
   `editorPromptTrackOffset()` — a numeric prompt mirroring the global audio-shift
   dialog (`editorPromptAudioShift`), funneled through the same 1 ms resolution, anti-garbage
-  (`parseFloat(x) || 0` cannot silently zero a real offset) and no-op guards, and a single
-  undoable step so the typed value never absorbs the next keyboard nudge. Added keyboard
+  (`parseFloat(x) || 0` cannot silently zero a real offset) and no-op guards — an unparseable
+  or already-set value now says so in the status line instead of closing the dialog with no
+  feedback — and a single undoable step so the typed value never absorbs the next keyboard
+  nudge. Added keyboard
   nudging of the selected audio track in the Tracks overview: `Alt+Shift+←/→` shifts by 1 ms
   (fine) and `Ctrl+Alt+Shift+←/→` by 10 ms (coarse, matching the toolbar Offset box's
   +/-10ms buttons); the chord is local to parts-view and never shadows note/loop/anchor
-  arrow shortcuts. Undo coalescing: holding a nudge key no longer drops one undo entry per
+  arrow shortcuts, and works regardless of whether a loop region is live. Undo coalescing:
+  holding a nudge key no longer drops one undo entry per
   keystroke — `EditHistory.exec` now merges a live run of same-track nudges into the previous
   entry, with the run broken by any other command (an explicit set, a nudge on another track,
-  or an undo/redo that leaves the redo stack non-empty); `TrackOffsetCmd.merge` folds the
+  or any undo/redo — `doUndo` clears the merged entry's `coalesce`, so an undo→redo round trip
+  can't re-open the run and one `Ctrl+Z` never skips past the state a redo just restored);
+  `TrackOffsetCmd.merge` folds the
   new delta in without re-snapshotting the rollback target, so one `Ctrl+Z` still restores the
-  offset's true origin. Covered by `tests/track_nudge.test.mjs`. (Surfacing the new keys in
+  offset's true origin. Covered by `tests/track_nudge.test.mjs` and the keydown-path cases in
+  `tests/track_nudge_keydown.test.mjs`. (Surfacing the new keys in
   the `?` help panel belongs to the keybind audit in #10/#38 and is intentionally left here.)
 
 

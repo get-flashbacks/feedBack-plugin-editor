@@ -60,12 +60,14 @@ export class EditHistory {
         // keystroke. The contract is opt-in and conservative: a command opts in by
         // setting `coalesce` AND supplying a `merge(next)` that folds `next` into
         // itself; exec() only calls merge when the previous entry is a live,
-        // un-cleared nudge of the same kind. The `!this.redo.length` guard is the
-        // "unbroken run" clause — any undo/redo between two nudges puts the undone
-        // command on the redo stack, breaking the chain so the next nudge starts a
-        // FRESH step (Ctrl+Z therefore never lands mid-merge and can't resurrect a
-        // half-absorbed delta). Commands with no `merge` (every non-nudge today)
-        // fall straight through to the normal exec/push path unchanged.
+        // un-cleared nudge of the same kind. Two run-breakers, so ANY undo/redo
+        // ends the run: the `!this.redo.length` guard stops the next nudge the
+        // moment an undo parks a command on the redo stack, and doUndo clears
+        // that command's `coalesce`, so an undo→redo round trip (redo stack
+        // empty again) cannot re-open it either — the next nudge starts a
+        // FRESH step and Ctrl+Z never lands mid-merge or skips past the state
+        // a redo just restored. Commands with no `merge` (every non-nudge
+        // today) fall straight through to the normal exec/push path unchanged.
         if (this.undo.length && !this.redo.length && cmd.coalesce && typeof cmd.merge === 'function') {
             const prev = this.undo[this.undo.length - 1];
             if (prev && prev.coalesce && prev.merge(cmd)) {
@@ -101,6 +103,13 @@ export class EditHistory {
         // part the rollback would actually touch.
         if (_locked(c)) return;
         this.undo.pop(); c.rollback(); this.redo.push(c);
+        // Break any coalescing run this command was part of. The redo stack
+        // being non-empty already stops the next nudge from merging; clearing
+        // the flag keeps it stopped after a redo puts the command back (the
+        // redo stack is only ever populated here), so undo→redo→nudge starts a
+        // fresh step instead of re-opening the pre-undo run — one Ctrl+Z then
+        // lands on the state the redo restored, never past it.
+        c.coalesce = false;
         this._afterEdit(c); this._ui(); host.draw(); host.updateStatus();
     }
 
