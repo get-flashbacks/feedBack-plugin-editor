@@ -9,13 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Keybinds audit (issue #37): moved hardcoded keys to the shortcut registry.**
-  Spacebar (Play/Pause), per-track offset nudge (Alt+Shift+←/→ in Parts view),
-  and loop edge nudge (Alt+←/→ for start, Alt+Shift+←/→ for end) are now
-  registered commands — they appear in the shortcut help panel (?), the command
-  palette (Ctrl+K), and respect profile bindings (FeedBack/Logical/Cableton/EOF).
-  Context-dependent keys (require Parts view or an active loop selection) keep
-  their guards in `onKeyDown` but execute through the registry for consistency.
+- **Keybinds: Space and the context nudges are now shortcut-registry commands.**
+  Play/Pause (Space), per-track offset nudge (Alt+Shift+←/→ in Parts view),
+  and loop edge nudge (Alt+←/→ for start, Alt+Shift+←/→ for end) now appear in
+  the shortcut help panel (?) and the command palette (Ctrl+K) with
+  profile-aware, context-qualified key labels. The keyboard chords keep their
+  context guards in `onKeyDown`, which owns dispatch; the panel and palette run
+  the same commands by id.
 
 ### Security
 

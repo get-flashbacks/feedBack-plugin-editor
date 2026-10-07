@@ -67,17 +67,26 @@ export const editorToggleShortcutPanel = (force) => {
 };
 
 /* @pure:shortcut-panel-hint:start */
-// Digit-RANGE commands (fret 0-9, bookmark 1-9) are keyboard-only: a single
-// panel-button click can't pick which digit, so _editorRunEofCommand only
-// knows the per-digit forms (setFretDigit:<n>, gotoBookmark:<n>, …). Clicking
-// the bare range row would otherwise be silently inert — return an
-// instructional hint for those ids so the click tells the user which keys to
-// press; null for every ordinary command (which the panel runs directly).
+// Panel/palette ROWS that can't always execute need an outcome other than
+// silent failure. Two shapes land here, both via the run-first fallback in
+// editorRunShortcutCommand: digit-RANGE commands (fret 0-9, bookmark 1-9) are
+// keyboard-only — a single panel-button click can't pick which digit, so
+// _editorRunEofCommand only knows the per-digit forms (setFretDigit:<n>,
+// gotoBookmark:<n>, …) and returns false for the bare id — and context rows
+// whose guard (Parts view + selection, or an active loop) isn't met. The hint
+// tells the user what to do instead of silently doing nothing; null for any
+// ordinary command that runs to completion.
 function _editorShortcutPanelHintPure(id) {
     switch (id) {
     case 'gotoBookmarkDigit': return 'Press Alt+1 to Alt+9 to jump to a numbered bookmark';
     case 'setBookmarkDigit': return 'Press Shift+Alt+1 to Shift+Alt+9 to set or clear a bookmark at the cursor';
     case 'setFretDigit': return 'Press 0-9 to set the selected note fret';
+    case 'nudgeTrackOffsetLeft': return 'Requires the Tracks overview with a track selected';
+    case 'nudgeTrackOffsetRight': return 'Requires the Tracks overview with a track selected';
+    case 'nudgeLoopStartLeft': return 'Requires an active loop selection';
+    case 'nudgeLoopStartRight': return 'Requires an active loop selection';
+    case 'nudgeLoopEndLeft': return 'Requires an active loop selection';
+    case 'nudgeLoopEndRight': return 'Requires an active loop selection';
     default: return null;
     }
 }
@@ -90,14 +99,19 @@ export const editorRunShortcutCommand = (id) => {
         setStatus(`${def.label} is planned but not wired yet.`);
         return true;
     }
+    // Run first so in-context rows (track/loop nudge) execute; only an
+    // unhandled command falls back to the hint above.
+    if (_editorRunEofCommand(id)) {
+        _editorRenderShortcutPanel();
+        return true;
+    }
     const hint = _editorShortcutPanelHintPure(id);
     if (hint) {
         setStatus(hint);
         return true;
     }
-    const handled = _editorRunEofCommand(id);
     _editorRenderShortcutPanel();
-    return handled;
+    return false;
 };
 export function _editorCurrentNoteIndices() {
     return (!S.drumEditMode && !S.tempoMapMode && S.sel && S.sel.size) ? [...S.sel] : [];
@@ -686,19 +700,26 @@ function _editorNudgeSelectionTime(dir) {
     return true;
 }
 
-function _editorNudgeTrackOffset(dir) {
+// Track-offset / loop-edge nudges — the ONE action implementation for two
+// callers. onKeyDown owns the keyboard chords (the parts-view gate and the
+// S.barSel loop guard there decide dispatch), and the `?` panel / command
+// palette reach the same helpers by id through _editorRunEofCommand. `coarse`
+// is the Ctrl/Cmd 10 ms step the onKeyDown blocks read off the event; a panel
+// click carries no modifiers, so it runs on the default 1 ms step (mirroring
+// the toolbar Offset box's fine step).
+function _editorNudgeTrackOffset(dir, coarse = false) {
     if (!S.partsViewMode || !S.selectedTrackId) return false;
     const track = trackOffsetTarget(S.selectedTrackId);
     if (!track) return false;
-    const step = _editorTrackOffsetNudgeStepSec(false) * dir;
+    const step = _editorTrackOffsetNudgeStepSec(coarse) * dir;
     editorNudgeTrackOffset(track.id, step);
     host.draw();
     return true;
 }
 
-function _editorNudgeLoopEdge(edge, dir) {
+function _editorNudgeLoopEdge(edge, dir, coarse = false) {
     if (!S.barSel) return false;
-    _loopNudgeEdge(edge, dir, false);
+    _loopNudgeEdge(edge, dir, coarse);
     host.draw();
     return true;
 }
@@ -1406,7 +1427,7 @@ export function _editorRunEofCommand(cmd) {
     case 'manageStemTracks': return editorToggleStemTracks();
     case 'soloMyStem': return editorSoloMyStem();
     case 'toggleLoopAB': return _editorToggleLoopAB();
-    case 'togglePlay': return window.editorTogglePlay();
+    case 'togglePlay': window.editorTogglePlay(); return true;
     case 'toggleLoopRegion': return editorToggleLoopRegion();
     case 'songFit': _editorSongFit(); return true;
     case 'toggleOnsetStrip': return _editorToggleOnsetStrip();
@@ -1899,8 +1920,10 @@ export function onKeyDown(e) {
     }
     if (selectAllPolicy === 'text') return;
 
-    // Spacebar: play/pause (also stops recording). Handled via registry so it
-    // appears in the shortcut help and respects profile bindings.
+    // Spacebar: play/pause (also stops recording). Claimed here before the
+    // profile dispatch — every profile keeps Space on transport, and the
+    // registry row (togglePlay) is what advertises it in the `?` panel and
+    // the command palette.
     if (e.key === ' ' && !e.target.matches('input, select, textarea')) {
         e.preventDefault();
         return _editorRunEofCommand('togglePlay');
@@ -1924,23 +1947,19 @@ export function onKeyDown(e) {
     // the parts-view guard — which returns unconditionally in the overview — so
     // it can never run here whatever S.barSel holds (a loop region dragged in
     // note view survives the toggle into the overview). The two never meet, so
-    // the chord never shadows note editing, loop editing or anchor jumps. Fine
-    // = 1 ms; adding Ctrl/Cmd takes the 10 ms step, mirroring the +/-10ms
-    // buttons on the toolbar's Offset box. Each press is one undoable nudge;
-    // holding coalesces into a single undo step (see EditHistory.exec's merge
-    // hook). Surfaced via onKeyDown for now — registering it in the `?` help
-    // panel belongs to the keybinds audit (#10/#38).
+    // the chord never shadows note editing, loop editing or anchor jumps. Each
+    // press is one undoable nudge; holding coalesces into a single undo step
+    // (see EditHistory.exec's merge hook). This block owns the keyboard chord —
+    // the resolver intentionally leaves Alt+Shift+arrows unbound — while the
+    // `?` panel and command palette reach the same action through the registry
+    // row. The registerShortcut migration stays out of scope (#37-#40).
     if (S.partsViewMode && S.selectedTrackId
         && e.altKey && e.shiftKey
         && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')
         && !e.target.matches('input, select, textarea')) {
-        const track = trackOffsetTarget(S.selectedTrackId);
-        if (track) {
+        const dir = e.key === 'ArrowRight' ? 1 : -1;
+        if (_editorNudgeTrackOffset(dir, e.ctrlKey || e.metaKey)) {
             e.preventDefault();
-            const dir = e.key === 'ArrowRight' ? 1 : -1;
-            const step = _editorTrackOffsetNudgeStepSec(e.ctrlKey || e.metaKey) * dir;
-            editorNudgeTrackOffset(track.id, step);
-            host.draw();
             return;
         }
     }
@@ -2016,14 +2035,17 @@ export function onKeyDown(e) {
     // with the strip — the ruler is canvas, so the keyboard path claims a
     // chord instead). Alt keeps it clear of the plain/Ctrl arrow note-ops
     // (which never carry Alt); direct handling mirrors the drum-velocity
-    // nudge precedent above.
+    // nudge precedent above. This block owns the keyboard chord — the
+    // resolver's alt+arrow match is prevNote/nextNote — while the `?` panel
+    // and command palette reach the same nudge through the registry rows.
     if (S.barSel && e.altKey && !e.metaKey
         && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')
         && !e.target.matches('input, select, textarea')) {
-        e.preventDefault();
-        _loopNudgeEdge(e.shiftKey ? 'end' : 'start', e.key === 'ArrowRight' ? 1 : -1, e.ctrlKey);
-        host.draw();
-        return;
+        if (_editorNudgeLoopEdge(e.shiftKey ? 'end' : 'start',
+                e.key === 'ArrowRight' ? 1 : -1, e.ctrlKey)) {
+            e.preventDefault();
+            return;
+        }
     }
 
     // A pending tap-tempo run owns Enter/Escape until resolved — checked

@@ -101,12 +101,16 @@ const EDITOR_SHORTCUT_COMMANDS = Object.freeze([
     { id: 'nextAnchor', label: 'Jump to next anchor', group: 'Timeline', status: 'ready', keys: { feedback: 'Ctrl+Alt+Right', eof: 'Alt+Page Down' } },
     { id: 'gotoBookmarkDigit', label: 'Jump to bookmark 1-9', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+1-9', eof: 'Numpad 1-9 / Alt+1-9' } },
     { id: 'setBookmarkDigit', label: 'Set / clear bookmark 1-9 at cursor', group: 'Timeline', status: 'ready', keys: { feedback: 'Shift+Alt+1-9', eof: 'Ctrl+Numpad 1-9 / Shift+Alt+1-9' } },
-    { id: 'nudgeTrackOffsetLeft', label: 'Nudge selected track offset earlier', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Shift+Left', eof: '' } },
-    { id: 'nudgeTrackOffsetRight', label: 'Nudge selected track offset later', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Shift+Right', eof: '' } },
-    { id: 'nudgeLoopStartLeft', label: 'Nudge loop start earlier', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Left', eof: '' } },
-    { id: 'nudgeLoopStartRight', label: 'Nudge loop start later', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Right', eof: '' } },
-    { id: 'nudgeLoopEndLeft', label: 'Nudge loop end earlier', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Shift+Left', eof: '' } },
-    { id: 'nudgeLoopEndRight', label: 'Nudge loop end later', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Shift+Right', eof: '' } },
+    // Context-dependent chords: the onKeyDown blocks own the keyboard (see
+    // input.js), so the resolver leaves these unbound and these rows are what
+    // surface them in the panel / palette. The ` (...)` qualifier is the house
+    // context-suffix idiom (ruler.js strips it back when it cites a key).
+    { id: 'nudgeTrackOffsetLeft', label: 'Nudge selected track offset earlier', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Shift+Left (Parts view)', eof: '' } },
+    { id: 'nudgeTrackOffsetRight', label: 'Nudge selected track offset later', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Shift+Right (Parts view)', eof: '' } },
+    { id: 'nudgeLoopStartLeft', label: 'Nudge loop start earlier', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Left (loop selected)', eof: '' } },
+    { id: 'nudgeLoopStartRight', label: 'Nudge loop start later', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Right (loop selected)', eof: '' } },
+    { id: 'nudgeLoopEndLeft', label: 'Nudge loop end earlier', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Shift+Left (loop selected)', eof: '' } },
+    { id: 'nudgeLoopEndRight', label: 'Nudge loop end later', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Shift+Right (loop selected)', eof: '' } },
     { id: 'shortenSustain', label: 'Shorten selected sustain', group: 'Grid and sustain', status: 'ready', keys: { feedback: '[', eof: '[ / Wheel down' } },
     { id: 'lengthenSustain', label: 'Lengthen selected sustain', group: 'Grid and sustain', status: 'ready', keys: { feedback: ']', eof: '] / Wheel up' } },
     { id: 'toggleSnap', label: 'Toggle snap on/off', group: 'Grid and sustain', status: 'ready', keys: { feedback: 'G', logical: 'Shift+G', cableton: 'Ctrl+4', eof: '' } },
@@ -533,7 +537,6 @@ export function _editorFeedbackCommandForKeyPure(e, mode) {
     const ctrl = (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey;
     const shift = e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey;
     const alt = e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey;
-    const altShift = e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey;
     const ctrlAlt = (e.ctrlKey || e.metaKey) && e.altKey && !e.shiftKey;
     const ctrlShift = (e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey;
     if (mode === 'tempoMap') {
@@ -576,10 +579,9 @@ export function _editorFeedbackCommandForKeyPure(e, mode) {
     if (sig === 'Ctrl+PageDown') return 'nextGrid';
     if (ctrlAlt && e.key === 'ArrowLeft') return 'prevAnchor';
     if (ctrlAlt && e.key === 'ArrowRight') return 'nextAnchor';
-    if (alt && !e.shiftKey && e.key === 'ArrowLeft') return 'nudgeLoopStartLeft';
-    if (alt && !e.shiftKey && e.key === 'ArrowRight') return 'nudgeLoopStartRight';
-    if (altShift && e.key === 'ArrowLeft') return 'nudgeTrackOffsetLeft';
-    if (altShift && e.key === 'ArrowRight') return 'nudgeTrackOffsetRight';
+    // The track-offset (Parts view) and loop-edge chords are NOT resolved here:
+    // those context guards live in onKeyDown's blocks, and alt+arrow belongs
+    // to prevNote/nextNote above — resolving them would shadow those.
     if (plain && e.key === 'ArrowLeft') return 'nudgeTimeLeft';
     if (plain && e.key === 'ArrowRight') return 'nudgeTimeRight';
     if (plain && key === 'g') return 'toggleSnap';
