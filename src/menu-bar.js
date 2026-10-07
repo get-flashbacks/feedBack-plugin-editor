@@ -46,6 +46,7 @@ import {
 import { _clearBarSelection, editorLoopSnapMode, editorSetLoopSnapMode } from './loop.js';
 import { editorSetTabViewStaff, editorTabViewStaff } from './tab-view-live.js';
 import { stemMixerAvailable } from './stem-tracks.js';
+import { _editorKeysMaxSpan } from './playability-lint.js';
 
 /* @pure:menu-model:start */
 // The nine menus (charrette §2.2). Item kinds:
@@ -170,6 +171,10 @@ export const EDITOR_MENUS = Object.freeze([
         { cmd: 'togglePartsView' },
         { cmd: 'toggleKeyHighlight' },
         { label: 'Hand shading (keys)', fn: 'editorToggleHandShading' },
+        { hdr: 'Max hand span (keys)' },
+        { maxHandSpan: 16, label: '10th (16 semitones)' },
+        { maxHandSpan: 18, label: '11th (18 semitones)' },
+        { maxHandSpan: 19, label: '12th (19 semitones)' },
         { cmd: 'toggleFollow' },
         // Scroll in Play (Logic's term): the CONTINUOUS manner of follow — the
         // playhead pins and the view scrolls under it, instead of page-jumping.
@@ -381,6 +386,20 @@ export function _menuModelPure(menus, rows, ctx) {
                 });
                 continue;
             }
+            if (it.maxHandSpan != null) {
+                // Max hand span radio (keys playability lint). Current value from
+                // localStorage via _editorKeysMaxSpan (degrades to default under node).
+                const current = typeof _editorKeysMaxSpan === 'function' ? _editorKeysMaxSpan() : 16;
+                const on = current === it.maxHandSpan;
+                items.push({
+                    label: (on ? '✓ ' : '  ') + it.label,
+                    key: '',
+                    dispatch: { maxHandSpan: it.maxHandSpan },
+                    disabled: false,
+                    planned: false,
+                });
+                continue;
+            }
             if (it.gmVoiceRows) {
                 // Per-kind instrument radio rows (DAW 1.5): expand to the
                 // CURRENT part kind's curated choices; no kind (no song, or
@@ -490,6 +509,10 @@ function dispatch(d) {
     if (d.loopClear) { _clearBarSelection(); return; }
     if (d.guideVoice) { _editorSetGuideVoiceMode(d.guideVoice); return; }
     if (d.gmVoice != null) { editorSetGmVoice(d.gmKind, d.gmVoice); return; }
+    if (d.maxHandSpan != null) {
+        if (typeof window.editorSetKeysMaxSpan === 'function') window.editorSetKeysMaxSpan(d.maxHandSpan);
+        return;
+    }
     if (d.fn === '__swapProfile') {
         // Cycle the four profiles in a fixed order; the two selects follow.
         const order = ['feedback', 'logical', 'cableton', 'eof'];

@@ -1705,6 +1705,11 @@ window.editorSetSwing = (pct) => {
         ? 'Swing off — straight grid'
         : `Swing ${S.swingPct}% — off-subdivisions displace toward the next beat (snap only; playback is unchanged)`);
 };
+window.editorSetKeysMaxSpan = (span) => {
+    const n = Number.isFinite(span) ? Math.max(12, Math.floor(span)) : 16;
+    try { localStorage.setItem('editorKeysMaxSpan', String(n)); } catch (_) {}
+    setStatus(`Max hand span for keys set to ${n} semitones (${n - 6}th)`);
+};
 window.editorSetSnapEnabled = (enabled) => {
     S.snapEnabled = !!enabled;
     const el = document.getElementById('editor-snap-enabled');
@@ -2416,6 +2421,8 @@ function init() {
     initFretboardStrip();
     // Restore the swing pref (editor pref, never the pack) and seed its select.
     try { window.editorSetSwing(localStorage.getItem('editorSwingPct')); } catch (_) {}
+    // Restore the keys max hand span pref (editor pref, never the pack).
+    try { window.editorSetKeysMaxSpan(localStorage.getItem('editorKeysMaxSpan')); } catch (_) {}
     initMenuBar();
     initTransportBar();
     initToolbars();
