@@ -216,6 +216,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the compose/MIDI-only fallback (`_composeSongDuration`) and the audio-bounded
   guard in `_editorClampScrollX` are untouched.
 
+- **Idle editor sessions are evicted and the sweep is now covered by tests.**
+  The eviction loop itself already ran on startup (`_editor_session_sweep_loop`,
+  5-min sleep, 1-hour idle threshold, reusing `_dispose_editor_session` which
+  exempts the shared sloppak extraction cache) — but it was a nested closure in
+  `setup()`, so nothing could exercise it, and it logged to a logger name
+  (`"feedBack.editor"`) that doesn't match the one every other route logs to
+  (`"slopsmith.plugin.editor"`), so a sweep failure was invisible. Lifted the
+  sweep, the dispose helper and the TTL/interval constants to module scope,
+  parameterized by the `sessions` dict so they're callable in-process with a
+  injectable `now` (the `@app.on_event("startup")` loop is the only thing that
+  runs in production; tests drive it directly). Fixed the logger name.
+  `tests/test_session_ttl_sweep.py` pins idle eviction + temp-sandbox removal,
+  recent-session retention, and sloppak-session eviction that leaves the shared
+  cache directory intact (#32).
+
 - **The DPR watcher is disposed when the editor screen is torn down.** The
   monitor-move / browser-zoom refresh (`matchMedia('(resolution: …)')`, the
   improvement plan's P0.5) lives on `window`, outside the tracked listener

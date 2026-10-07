@@ -4468,6 +4468,80 @@ def _arr_to_data(arr, name):
     return arr_data
 
 
+# ── Idle session eviction (improvement-plan P2, issue #32) ───────────────
+#
+# The `sessions` dict has no per-entry TTL of its own — the only explicit
+# cleanup is POST /session/close, fired best-effort from the frontend's
+# disposeBackendSession() (src/session-lifecycle.js), which never runs on a
+# crashed tab / closed browser / lost network. Long-running server instances
+# would otherwise accumulate abandoned sessions (and their temp sandbox
+# dirs) indefinitely. Every route that touches a session already stamps
+# `last_touched`, so idle time is simply `time.time() - session["last_touched"]`.
+#
+# This mirrors the ancestor's own periodic sweep (background task, 5-min
+# sleep, 1-hour idle threshold) rather than the demo-mode janitor
+# (lib/demo_mode.py's register_demo_janitor_hook), which only runs when
+# FEEDBACK_DEMO_MODE is set and is therefore not a substitute for normal
+# production operation. `_dispose_editor_session` already carries the
+# shared-extraction-cache exemption (sloppak sessions' `dir` is never
+# removed), so the sweep reuses it unchanged rather than re-deriving the
+# exemption.
+#
+# These helpers live at MODULE scope — parameterized by `sessions` — so tests
+# can drive eviction directly without spinning up a real event loop (the
+# @app.on_event("startup") loop is the only thing that runs in production; the
+# unit tests call `_sweep_idle_editor_sessions` in-process with a frozen `now`).
+_SESSION_IDLE_TTL_SECS = 60 * 60       # evict sessions idle longer than 1 hour
+_SESSION_SWEEP_INTERVAL_SECS = 5 * 60  # check every 5 minutes
+
+
+def _dispose_editor_session(sessions, session_id: str) -> bool:
+    """Pop `session_id` from `sessions` and remove its temp sandbox dir.
+
+    Native sloppak sessions point at the shared extraction cache — never
+    remove that tree. Archive/create sessions own temporary sandboxes.
+    """
+    session = sessions.pop(session_id, None)
+    if not session:
+        return False
+    if session.get("format") != "sloppak":
+        shutil.rmtree(session.get("dir", ""), ignore_errors=True)
+    return True
+
+
+async def _sweep_idle_editor_sessions(sessions, idle_secs=_SESSION_IDLE_TTL_SECS,
+                                       now=None):
+    """Evict every session in `sessions` idle longer than `idle_secs`.
+
+    `now` is injectable so tests can simulate the passage of time without
+    sleeping. Snapshot ids before disposing — `_dispose_editor_session`
+    mutates `sessions`, so iterating it directly while evicting would be
+    modifying the dict during iteration.
+    """
+    if now is None:
+        now = time.time()
+    stale_ids = [
+        sid for sid, session in sessions.items()
+        if now - session.get("last_touched", now) > idle_secs
+    ]
+    for sid in stale_ids:
+        _dispose_editor_session(sessions, sid)
+    return len(stale_ids)
+
+
+async def _editor_session_sweep_loop(sessions, interval=_SESSION_SWEEP_INTERVAL_SECS):
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await _sweep_idle_editor_sessions(sessions)
+        except Exception:
+            # A sweep failure must never kill the loop — log and retry on the
+            # next interval rather than silently stopping all future eviction
+            # for the life of the process.
+            logging.getLogger("slopsmith.plugin.editor").exception(
+                "editor session sweep failed")
+
+
 def setup(app, context):
     config_dir = context["config_dir"]
     get_dlc_dir = context["get_dlc_dir"]
@@ -4580,70 +4654,22 @@ def setup(app, context):
     global _sessions
     _sessions = sessions
 
-    def _dispose_editor_session(session_id: str) -> bool:
-        session = sessions.pop(session_id, None)
-        if not session:
-            return False
-        # Native sloppak sessions point at the shared extraction cache; never
-        # remove that tree. Archive/create sessions own temporary sandboxes.
-        if session.get("format") != "sloppak":
-            shutil.rmtree(session.get("dir", ""), ignore_errors=True)
-        return True
-
-    # ── Idle session eviction ───────────────────────────────────────────
-    #
-    # The `sessions` dict above had no TTL eviction — the only cleanup was
-    # POST /session/close, fired best-effort from the frontend's
-    # disposeBackendSession() (src/session-lifecycle.js), which never runs on
-    # a crashed tab / closed browser / lost network. Long-running server
-    # instances would accumulate abandoned sessions (and their temp sandbox
-    # dirs) indefinitely. Every route that touches a session already stamps
-    # `last_touched` (see save_song, etc.), so idle time is simply
-    # `time.time() - session["last_touched"]`.
-    #
-    # This mirrors the ancestor's own periodic sweep (background task, 5-min
-    # sleep, 1-hour idle threshold) rather than the demo-mode janitor
-    # (lib/demo_mode.py's register_demo_janitor_hook), which only runs when
-    # FEEDBACK_DEMO_MODE is set and is therefore not a substitute for normal
-    # production operation. _dispose_editor_session already carries the
-    # shared-extraction-cache exemption (sloppak sessions' `dir` is never
-    # removed), so the sweep reuses it unchanged rather than re-deriving the
-    # exemption.
-    _SESSION_IDLE_TTL_SECS = 60 * 60       # evict sessions idle longer than 1 hour
-    _SESSION_SWEEP_INTERVAL_SECS = 5 * 60  # check every 5 minutes
-
-    async def _sweep_idle_editor_sessions():
-        now = time.time()
-        # Snapshot ids before disposing — _dispose_editor_session mutates
-        # `sessions`, so iterating it directly while evicting would be
-        # modifying the dict during iteration.
-        stale_ids = [
-            sid for sid, session in sessions.items()
-            if now - session.get("last_touched", now) > _SESSION_IDLE_TTL_SECS
-        ]
-        for sid in stale_ids:
-            _dispose_editor_session(sid)
-
-    async def _editor_session_sweep_loop():
-        while True:
-            await asyncio.sleep(_SESSION_SWEEP_INTERVAL_SECS)
-            try:
-                await _sweep_idle_editor_sessions()
-            except Exception:
-                # A sweep failure must never kill the loop — log and retry
-                # on the next interval rather than silently stopping all
-                # future eviction for the life of the process.
-                logging.getLogger("feedBack.editor").exception(
-                    "editor session sweep failed")
-
-    @app.on_event("startup")
-    async def _start_editor_session_sweep():
-        asyncio.create_task(_editor_session_sweep_loop())
+    # Idle session eviction (see the module-level docstring above
+    # `_sweep_idle_editor_sessions` for the full rationale). The startup hook
+    # below starts the production loop; tests call the module-level sweep
+    # directly with a frozen `now`.
 
     @app.post("/api/plugins/editor/session/close")
     async def close_editor_session(data: dict):
         session_id = str(data.get("session_id") or "")
-        return {"closed": _dispose_editor_session(session_id)}
+        return {"closed": _dispose_editor_session(sessions, session_id)}
+
+    @app.on_event("startup")
+    async def _start_editor_session_sweep():
+        # The loop itself is module-level and parameterized by `sessions`,
+        # so tests can drive eviction without it. In production this is the
+        # only thing that actually runs the sweep.
+        asyncio.create_task(_editor_session_sweep_loop(sessions))
 
     @app.get("/api/plugins/editor/session/export")
     async def export_editor_session(session_id: str):
