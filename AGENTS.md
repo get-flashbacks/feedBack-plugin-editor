@@ -13,6 +13,8 @@ npm run lint                          # npx --yes eslint@9.39.4 src tests
 python -m pytest                      # backend suites in tests/test_*.py
 ```
 
+These commands also live in `README.md` (Developing) — keep the two in sync.
+
 ## The two things that trip up newcomers
 
 - **No `node_modules`, ever.** The desktop bundler copies this whole directory
