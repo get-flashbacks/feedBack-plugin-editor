@@ -82,6 +82,7 @@ export const EDITOR_MENUS = Object.freeze([
         { label: 'Undo', fn: 'editorUndo', key: 'Ctrl+Z' },
         { label: 'Redo', fn: 'editorRedo', key: 'Ctrl+Y' },
         { label: 'Undo to last checkpoint', fn: 'editorUndoToCheckpoint', key: 'Ctrl+Alt+Z' },
+        { label: 'Revert last action', fn: 'editorRevertLastAction' },
         { sep: true },
         { cmd: 'copySelection' },
         { cmd: 'cutSelection' },

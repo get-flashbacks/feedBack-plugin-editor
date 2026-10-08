@@ -81,6 +81,7 @@ export function seedState({ arrangements = [], currentArr = 0, rollView = false,
         arrangements,
         currentArr,
         sel: new Set(),
+        lastAction: '',
         ...rest,
     });
     setRollView(rollView);
