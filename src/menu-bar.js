@@ -509,14 +509,17 @@ const _dispatchHandlers = {
     guideVoice: d => _editorSetGuideVoiceMode(d.guideVoice),
     gmVoice: d => editorSetGmVoice(d.gmKind, d.gmVoice),
     maxHandSpan: d => window.editorSetKeysMaxSpan?.(d.maxHandSpan),
-    __swapProfile: d => {
-        const order = ['feedback', 'logical', 'cableton', 'eof'];
-        const next = order[(order.indexOf(editorShortcutProfile) + 1) % order.length];
-        window.editorSetShortcutProfile?.(next);
-        const sel = document.getElementById('editor-shortcut-profile');
-        if (sel) sel.value = next;
-    },
-    fn: d => window[d.fn]?.()
+    fn: d => {
+        if (d.fn === '__swapProfile') {
+            const order = ['feedback', 'logical', 'cableton', 'eof'];
+            const next = order[(order.indexOf(editorShortcutProfile) + 1) % order.length];
+            if (typeof window.editorSetShortcutProfile === 'function') window.editorSetShortcutProfile(next);
+            const sel = document.getElementById('editor-shortcut-profile');
+            if (sel) sel.value = next;
+            return;
+        }
+        window[d.fn]?.();
+    }
 };
 
 function dispatch(d) {
