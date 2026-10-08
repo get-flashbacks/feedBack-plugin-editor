@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The undo stack is no longer invisible: a last-action label and a Revert
+  button sit beside Undo/Redo (#43).** Every committed edit now names itself —
+  the label is derived from the command's own class (or an explicit `label` on
+  the command), recorded on `S.lastAction`, and shown in the toolbar next to
+  the undo/redo buttons. "Revert last action" (Edit menu, and the button) is a
+  single undo that *names* what it is undoing, so a user who never watched the
+  status line can still tell what the button will do. The label rolls back with
+  the stack (undoing the last edit re-names the one below it) and clears on
+  `reset()`/load, so it can never advertise a stale edit. `Ctrl+Shift+Z` stays
+  the standard redo chord — the Revert verb is deliberately a button/menu
+  action, not a second undo chord.
+
 - **Keybinds: Space and the context nudges are now shortcut-registry commands.**
   Play/Pause (Space), per-track offset nudge (Alt+Shift+←/→ in Parts view),
   and loop edge nudge (Alt+←/→ for start, Alt+Shift+←/→ for end) now appear in

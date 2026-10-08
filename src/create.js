@@ -2462,6 +2462,10 @@ export async function editorApplyCreateResult(data) {
     S.loopEnabled = false;
     S.returnToHighway = false;
     S.history = new EditHistory();
+    S.lastAction = '';
+    // Same as loadCDLC: a reassigned stack never runs _ui(), so refresh the
+    // label / Revert / Undo / Redo readout here or the toolbar stays stale.
+    S.history._ui();
     S.createMode = true;
     // C1 lane seed: an import (Guitar Pro / XML project) → the Transcribe
     // surface, since aligning the grid to the source is the first task

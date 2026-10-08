@@ -86,6 +86,10 @@
         <button id="editor-redo" onclick="editorRedo()" class="px-2 py-1 bg-dark-600 hover:bg-dark-500 rounded text-xs" disabled title="Redo (Ctrl+Y)">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 10H11a5 5 0 00-5 5v2M21 10l-4-4M21 10l-4 4"/></svg>
         </button>
+        <span id="editor-last-action" class="px-2 py-1 text-[10px] leading-none text-gray-500 truncate max-w-[12rem]" title="The last committed edit — the Revert button undoes it"></span>
+        <button id="editor-revert" onclick="editorRevertLastAction()" class="px-2 py-1 bg-dark-600 hover:bg-dark-500 rounded text-xs disabled:opacity-40 disabled:cursor-not-allowed" disabled title="Revert the last action — undo without guessing which key">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v6h6M3 13a9 9 0 019-9 9 9 0 016 3l-3 3M3 13l4-4"/></svg>
+        </button>
 
         <div class="h-4 w-px bg-gray-700"></div>
         </div>

@@ -191,6 +191,12 @@ export const S = {
     // Waveform cache
     waveformPeaks: null,
 
+    // The last committed edit, as a human label — "what just happened", so a
+    // user who didn't watch the status line can still tell. Set by
+    // EditHistory._afterEdit from the command's own label; cleared on load /
+    // reset so a stale label never outlives the stack it described. Never
+    // serialized: it is UI state, not pack data.
+    lastAction: '',
     // History
     history: null,
     // True when the current job contains work not durably saved. This is

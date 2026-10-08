@@ -2199,6 +2199,11 @@ export function onKeyDown(e) {
         window.editorUndoToCheckpoint();
         return;
     }
+    // NOTE: no Revert chord here. Ctrl+Shift+Z is the standard redo spelling
+    // (tests/undo_typing_target.test.mjs pins it, and it is what a browser/DAW
+    // user expects), so the Revert verb stays a toolbar/menu action — which is
+    // where the issue #43 discoverability gap actually lived (an invisible
+    // stack), not in the keyboard.
     if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !_editorIsTypingTarget(e)) {
         e.preventDefault();
         window.editorUndo();

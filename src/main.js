@@ -1664,6 +1664,23 @@ window.editorUndoToCheckpoint = () => {
             ? `Undid ${n} back to checkpoint: ${r.label}.`
             : `Undid ${n} — undo refused before reaching the checkpoint.`);
 };
+// Revert the last action — the toolbar button and the Edit ▸ Revert last
+// action menu entry. It is a single undo that NAMES what it is undoing
+// (S.lastAction, set by EditHistory), so a user who never watched the status
+// line can still tell what the button will do. Distinct from Undo (Ctrl+Z):
+// that key is the generic "go back one", while this one is the discoverable
+// "I just did X, undo X" verb. A refused undo (read-only roll / missing
+// arrangement) leaves the last action in place and says so, so the label
+// can't go stale on a no-op.
+window.editorRevertLastAction = () => {
+    if (!S.history || !S.history.undo.length) { setStatus('Nothing to revert.'); return; }
+    const what = S.lastAction || 'this edit';
+    const before = S.history.undo.length;
+    S.history.doUndo();
+    setStatus(S.history.undo.length < before
+        ? `Reverted ${what}.`
+        : `Could not revert ${what} — undo refused.`);
+};
 window.editorTogglePlay = () => {
     // Route stops through the recorder while a take is active so the
     // spacebar (or any other transport caller) finalizes the recording
@@ -2348,6 +2365,7 @@ function init() {
     _editorInited = true;
     _applyV3Layout();
     S.history = new EditHistory();
+    S.lastAction = '';
 
     _editorLoadShortcutProfile();
 

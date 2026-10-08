@@ -18,6 +18,74 @@ import { host } from './host.js';
 import { S, bumpEditGen, markSessionDirty } from './state.js';
 import { isKeysMode, updatePianoRange, _rollReadOnly, _rollLockNotice } from './keys.js';
 
+// The last committed edit, as a human label — "what just happened", so a user
+// who didn't watch the status line can still tell what the Revert button would
+// undo. Derived here from the command's own class name (every command in this
+// codebase is a `*Cmd`), so it needs no per-command `label` field and can't drift
+// out of sync with the class that does the work. A command may carry its own
+// `label` (a more specific name than its class — e.g. a tempo-map command that
+// does several things); when it does, that wins. Never serialized: it is UI
+// state, not pack data, and it is cleared by reset() and by the load path.
+/* @pure:last-action:start */
+const _COMMAND_LABEL_OVERRIDES = Object.freeze({
+    AudioShiftCmd: 'shift the recording',
+    TempoOffsetCmd: 'nudge the audio offset',
+    TempoGridCmd: 'rebuild the beat grid',
+    TempoMapCmd: 'edit the tempo map',
+    TempoLockCmd: 'lock barlines',
+    RenameArrangementCmd: 'rename the track',
+    SetArrangementTypeCmd: 'set the track type',
+    ReplaceArrangementChartCmd: 'replace the chart',
+    TrackOffsetCmd: 'nudge the track offset',
+    MoveRegionCmd: 'move a region',
+    PlaceRegionCmd: 'place a region',
+    DeleteRegionCmd: 'delete a region',
+    TrimRegionCmd: 'trim a region',
+    AddDrumHitCmd: 'add a drum hit',
+    DeleteDrumHitsCmd: 'delete drum hits',
+    MoveDrumHitsCmd: 'move drum hits',
+    ToggleDrumArticulationCmd: 'toggle a drum articulation',
+    SetDrumVelocityCmd: 'set drum velocity',
+    AddNoteCmd: 'add a note',
+    MoveNoteCmd: 'move a note',
+    DeleteNotesCmd: 'delete notes',
+    SplitNotesCmd: 'split notes',
+    ResizeSustainCmd: 'resize a sustain',
+    ResizeSustainGroupCmd: 'resize sustains',
+    ChangeFretCmd: 'change a fret',
+    ChangeFretGroupCmd: 'change frets',
+    ToggleTechniqueCmd: 'toggle a technique',
+    SetTechScalarPerNoteCmd: 'set a technique value',
+    SetTechScalarCmd: 'set a technique value',
+    SetBendShapeCmd: 'set a bend shape',
+    SetBendIntentCmd: 'set a bend intent',
+    SetTeachingMarkCmd: 'set a teaching mark',
+    SetTeachingMarksCmd: 'set teaching marks',
+    SetPitchedSlideTargetsCmd: 'set slide targets',
+    EditChordFnCmd: 'edit a chord',
+    AcceptPositionsCmd: 'accept note positions',
+    MoveToStringCmd: 'move notes to a string',
+    AddStringCmd: 'add a string',
+    RemoveStringCmd: 'remove a string',
+    RemoveStringWithNotesCmd: 'remove a string and its notes',
+});
+// "DeleteNotesCmd" → "delete notes" — drop the trailing Cmd, split the camel
+// boundary, and lower-case the result. Kept in a function (not an inline map)
+// so the fallback is one tested expression rather than 40 hand-maintained rows.
+export function _commandLabelPure(cmd) {
+    if (!cmd) return '';
+    if (typeof cmd.label === 'string' && cmd.label) return cmd.label;
+    const name = typeof cmd.constructor?.name === 'string' ? cmd.constructor.name : '';
+    // A plain object literal (or a command with no class behind it) carries the
+    // generic name 'Object' — that is not a label, it is an unlabeled command.
+    if (!name || name === 'Object') return '';
+    if (Object.prototype.hasOwnProperty.call(_COMMAND_LABEL_OVERRIDES, name)) {
+        return _COMMAND_LABEL_OVERRIDES[name];
+    }
+    return name.replace(/Cmd$/, '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
+}
+/* @pure:last-action:end */
+
 // Cap the undo stack so a marathon session can't grow memory without bound —
 // the stack held every command since the last save/load. Oldest entries drop
 // first; 500 comfortably exceeds any realistic between-saves editing run.
@@ -132,7 +200,7 @@ export class EditHistory {
     // index-based command would now roll back into the wrong note). Reuse the
     // live instance + its _ui() wiring rather than reassigning S.history.
     // Not _afterEdit() — that nudges the piano viewport, which a clear shouldn't.
-    reset() { this.undo = []; this.redo = []; this._ui(); }
+    reset() { this.undo = []; this.redo = []; S.lastAction = ''; this._ui(); }
 
     // Stamp the top-of-undo command as a named checkpoint: "the state as of
     // this call is worth returning to". undoToCheckpoint() rewinds every
@@ -192,6 +260,16 @@ export class EditHistory {
         // belong in Undo but are not serialized into the pack. They still
         // invalidate proposal caches, but must not create a false Save prompt.
         if (!(cmd && cmd.sessionNeutral)) markSessionDirty();
+        // Record what just happened, so the Revert button and the last-action
+        // readout can name it. The label names the TOP OF THE UNDO STACK — the
+        // action a Revert would undo — not the command that just ran: after a
+        // doUndo that command is on the redo stack and is no longer a Revert
+        // target, so naming it would advertise a button that would only redo.
+        // A zero-delta no-op (exec() returned early) never reaches here, so a
+        // stale label can't survive a no-op call.
+        S.lastAction = this.undo.length
+            ? _commandLabelPure(this.undo[this.undo.length - 1])
+            : '';
         // Keep the keys viewport in sync with the current note range so
         // multi-octave authoring works without manual range control.
         // expandOnly=true so adding a note outside the current viewport
@@ -204,5 +282,18 @@ export class EditHistory {
         const r = document.getElementById('editor-redo');
         if (u) u.disabled = !this.undo.length;
         if (r) r.disabled = !this.redo.length;
+        // The Revert button and the last-action readout: enabled exactly when
+        // there is an undoable action to name, and labelled from S.lastAction
+        // (set by _afterEdit). A cleared stack (load, reset) blanks both.
+        const rev = document.getElementById('editor-revert');
+        const lab = document.getElementById('editor-last-action');
+        const have = !!this.undo.length;
+        if (rev) {
+            rev.disabled = !have;
+            rev.title = have
+                ? `Revert the last action (${S.lastAction || 'this edit'}) — undo without guessing which key`
+                : 'Nothing to revert';
+        }
+        if (lab) lab.textContent = have ? (S.lastAction || '') : '';
     }
 }
