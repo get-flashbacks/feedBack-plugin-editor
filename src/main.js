@@ -126,7 +126,7 @@ import {
 import { setHostHooks } from './host.js';
 import { dismissSessionPrompt, guardSessionTransition } from './session-lifecycle.js';
 import { initAnchorResolve } from './anchor-resolve.js';
-import { _lintChipRefresh, editorToggleLintPopover, initPlayabilityLint } from './playability-lint.js';
+import { _lintChipRefresh, editorToggleLintPopover, initPlayabilityLint, _editorSetKeysMaxSpan, _spanToIntervalNumberPure } from './playability-lint.js';
 import { _drumPadStripRefresh, editorToggleDrumPadStrip, initDrumPadStrip, teardownDrumPadStrip } from './drum-pad-strip.js';
 import { _fretboardStripRefresh, editorToggleFretboardStrip, initFretboardStrip } from './fretboard-strip.js';
 import { EDITOR_MENUS, initMenuBar } from './menu-bar.js';
@@ -1706,8 +1706,7 @@ window.editorSetSwing = (pct) => {
         : `Swing ${S.swingPct}% — off-subdivisions displace toward the next beat (snap only; playback is unchanged)`);
 };
 window.editorSetKeysMaxSpan = (span) => {
-    const n = Number.isFinite(span) ? Math.max(12, Math.floor(span)) : 16;
-    try { localStorage.setItem('editorKeysMaxSpan', String(n)); } catch (_) {}
+    const n = _editorSetKeysMaxSpan(span);
     setStatus(`Max hand span for keys set to ${n} semitones (${_spanToIntervalNumberPure(n)}th)`);
 };
 window.editorSetSnapEnabled = (enabled) => {
@@ -2422,7 +2421,7 @@ function init() {
     // Restore the swing pref (editor pref, never the pack) and seed its select.
     try { window.editorSetSwing(localStorage.getItem('editorSwingPct')); } catch (_) {}
     // Restore the keys max hand span pref (editor pref, never the pack).
-    try { window.editorSetKeysMaxSpan(localStorage.getItem('editorKeysMaxSpan')); } catch (_) {}
+    try { _editorSetKeysMaxSpan(localStorage.getItem('editorKeysMaxSpan')); } catch (_) {}
     initMenuBar();
     initTransportBar();
     initToolbars();

@@ -66,18 +66,26 @@ export function _editorKeysMaxSpan() {
     } catch (_) { return KEYS_SPAN_ERR_DEFAULT; }
 }
 export function _editorSetKeysMaxSpan(v) {
-    const n = Number.isFinite(v) ? Math.max(12, Math.floor(v)) : KEYS_SPAN_ERR_DEFAULT;
+    const n = Number.isFinite(Number(v)) ? Math.max(12, Math.floor(Number(v))) : KEYS_SPAN_ERR_DEFAULT;
     try { localStorage.setItem('editorKeysMaxSpan', String(n)); } catch (_) {}
+    _invalidateLintMemo();
     return n;
 }
 
-// Semitone span → interval degree number, per the keys-span mapping (16→10th,
-// 18→11th, 19→12th). `span - 6` only lands for 16; compound intervals are
-// 7*octaves + simpleDegree (the tritone = aug. 4th), giving 18→11th, 19→12th.
+// Map semitone span to ordinal interval number for display (16->10th, 18->11th, 19->12th).
+// For other values >=12, falls back to compound-interval heuristic (7 per octave).
 export function _spanToIntervalNumberPure(span) {
-    if (!Number.isFinite(span) || span < 0) return null;
-    const simple = [1, 2, 2, 3, 3, 4, 4, 5, 6, 6, 7, 7][span % 12];
-    return 7 * Math.floor(span / 12) + simple;
+    if (span === 16) return 10;
+    if (span === 18) return 11;
+    if (span === 19) return 12;
+    const s = Math.max(12, Math.floor(span));
+    if (s <= 24) return s - 6;           // simple intervals within two octaves
+    const octaves = Math.floor((s - 12) / 12);
+    return 7 * (octaves + 1) + ((s - 12) % 12); // compound
+}
+
+function _invalidateLintMemo() {
+    _memo = { gen: -1, arrIdx: -1, notesRef: null, issues: [], flagged: new Set() };
 }
 
 // The fret-hand anchor list: authored anchors win, computed fall back —
