@@ -66,7 +66,12 @@ export function _editorKeysMaxSpan() {
     } catch (_) { return KEYS_SPAN_ERR_DEFAULT; }
 }
 export function _editorSetKeysMaxSpan(v) {
-    const n = Number.isFinite(Number(v)) ? Math.max(12, Math.floor(Number(v))) : KEYS_SPAN_ERR_DEFAULT;
+    const raw = (v == null || v === '') ? NaN : Number(v);
+    if (!Number.isFinite(raw)) {
+        _invalidateLintMemo();
+        return KEYS_SPAN_ERR_DEFAULT;
+    }
+    const n = Math.max(12, Math.floor(raw));
     try { localStorage.setItem('editorKeysMaxSpan', String(n)); } catch (_) {}
     _invalidateLintMemo();
     return n;

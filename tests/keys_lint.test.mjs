@@ -10,7 +10,7 @@
  */
 import assert from 'node:assert';
 import { S } from '../src/state.js';
-import { _keysLintPure, _lintResults, _spanToIntervalNumberPure } from '../src/playability-lint.js';
+import { _keysLintPure, _lintResults, _spanToIntervalNumberPure, _editorSetKeysMaxSpan, KEYS_SPAN_ERR_DEFAULT } from '../src/playability-lint.js';
 
 // A keys note: pitch is the piano-locked string*24 + fret packing; the hand
 // ('lh'/'rh') rides under techniques, absent = unassigned.
@@ -71,6 +71,22 @@ t('err detail names the configured threshold interval (18→11th, 19→12th), no
         assert.match(_keysLintPure([kn(60, 0, 'rh'), kn(79, 0, 'rh')])[0].detail, /beyond a 11th/);   // span 19 > 18
         stub(19);
         assert.match(_keysLintPure([kn(60, 0, 'rh'), kn(80, 0, 'rh')])[0].detail, /beyond a 12th/);   // span 20 > 19
+    } finally { globalThis.localStorage = orig; }
+});
+
+t('_editorSetKeysMaxSpan: absent/empty pref resolves to the 16 default, never persists 12', () => {
+    // Null (fresh profile) and '' both coerce to 0 via Number() — the guard
+    // must treat them as missing so init() never materialises a 12.
+    const orig = globalThis.localStorage;
+    const store = {};
+    globalThis.localStorage = { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); } };
+    try {
+        assert.strictEqual(_editorSetKeysMaxSpan(null), KEYS_SPAN_ERR_DEFAULT);
+        assert.strictEqual('editorKeysMaxSpan' in store, false, 'absent pref leaves storage untouched');
+        assert.strictEqual(_editorSetKeysMaxSpan(''), KEYS_SPAN_ERR_DEFAULT);
+        assert.strictEqual('editorKeysMaxSpan' in store, false, 'empty pref leaves storage untouched');
+        assert.strictEqual(_editorSetKeysMaxSpan(18), 18, 'a real choice persists');
+        assert.strictEqual(store.editorKeysMaxSpan, '18');
     } finally { globalThis.localStorage = orig; }
 });
 

@@ -60,6 +60,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `_spanToIntervalNumberPure` in `src/playability-lint.js`, covered by
   `tests/keys_lint.test.mjs`.
 
+- **Absent keys max-span pref no longer coerces to a 12-semitone threshold.**
+  `_editorSetKeysMaxSpan` treated `null`/`""` (a profile that never set the
+  pref, including `init()`'s restore on every fresh launch) as `0` via
+  `Number()` and persisted `"12"` — so new users silently got an octave limit
+  instead of the documented 16 default (a 10th), with a stray "beyond a 6th"
+  on wide reaches and no checked View ▸ Max hand span radio. Absent/empty now
+  resolves to `KEYS_SPAN_ERR_DEFAULT` and leaves storage untouched; only a
+  real choice is persisted. Covered by `tests/keys_lint.test.mjs`.
+
+- **Help ▸ Shortcut profile cycles again after the dispatch-table refactor.**
+  The table keyed the swap entry on a payload property no menu ever sets, so
+  `{ fn: '__swapProfile' }` fell through to a `window.__swapProfile` call that
+  exists nowhere and the item silently did nothing. The swap logic now lives in
+  the `fn` handler (which matches the actual payload), the unreachable entry
+  is gone, and `dispatch` is exported for the new `tests/menu_model.test.mjs`
+  regression that advances the profile through the real menu call path.
+
 ### Added
 
 - **Per-phrase difficulty tiers are now authorable outright — "Simplify phrase
