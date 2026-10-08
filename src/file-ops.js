@@ -310,6 +310,7 @@ export async function loadCDLC(filename, options = {}) {
         S.barSel = null;
         S.returnToHighway = false;
         S.history = new EditHistory();
+        S.lastAction = '';
         markSessionSaved();
 
         // Reset offset UI so _effectiveAudioOffset() doesn't carry over a

@@ -2365,6 +2365,7 @@ function init() {
     _editorInited = true;
     _applyV3Layout();
     S.history = new EditHistory();
+    S.lastAction = '';
 
     _editorLoadShortcutProfile();
 

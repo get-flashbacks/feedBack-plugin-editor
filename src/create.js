@@ -2462,6 +2462,7 @@ export async function editorApplyCreateResult(data) {
     S.loopEnabled = false;
     S.returnToHighway = false;
     S.history = new EditHistory();
+    S.lastAction = '';
     S.createMode = true;
     // C1 lane seed: an import (Guitar Pro / XML project) → the Transcribe
     // surface, since aligning the grid to the source is the first task
