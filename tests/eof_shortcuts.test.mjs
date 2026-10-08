@@ -119,6 +119,7 @@ t('exposes wired FeedBack Native key labels', () => {
     assert.strictEqual(rows.find(r => r.id === 'save').key, 'Ctrl+S');
     assert.strictEqual(rows.find(r => r.id === 'prevNote').key, 'Alt+Left');
     assert.strictEqual(rows.find(r => r.id === 'toggleWaveform').key, 'W');
+    assert.strictEqual(rows.find(r => r.id === 'togglePlay').key, 'Space');
     assert.strictEqual(rows.find(r => r.id === 'showShortcutHelp').key, '?');
     assert.strictEqual(rows.find(r => r.id === 'openCommandPalette').key, 'Ctrl+K');
     assert.strictEqual(rows.find(r => r.id === 'setFretDigit').key, '0-9');
@@ -142,10 +143,19 @@ t('exposes wired FeedBack Native key labels', () => {
     assert.strictEqual(rows.find(r => r.id === 'tempoInsertSync').key, 'I (Tempo Map)');
     assert.strictEqual(rows.find(r => r.id === 'tempoTapBpm').key, 'Shift+B (Tempo Map)');
     assert.strictEqual(rows.find(r => r.id === 'tempoFullDialog').key, 'Alt+T (Tempo Map)');
+    // Track offset nudge (context-dependent, shown in registry)
+    assert.strictEqual(rows.find(r => r.id === 'nudgeTrackOffsetLeft').key, 'Alt+Shift+Left (Parts view)');
+    assert.strictEqual(rows.find(r => r.id === 'nudgeTrackOffsetRight').key, 'Alt+Shift+Right (Parts view)');
+    // Loop nudge (context-dependent, shown in registry)
+    assert.strictEqual(rows.find(r => r.id === 'nudgeLoopStartLeft').key, 'Alt+Left (loop selected)');
+    assert.strictEqual(rows.find(r => r.id === 'nudgeLoopStartRight').key, 'Alt+Right (loop selected)');
+    assert.strictEqual(rows.find(r => r.id === 'nudgeLoopEndLeft').key, 'Alt+Shift+Left (loop selected)');
+    assert.strictEqual(rows.find(r => r.id === 'nudgeLoopEndRight').key, 'Alt+Shift+Right (loop selected)');
 });
 
 t('maps FeedBack Native timeline and grid shortcuts', () => {
     assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('w')), 'toggleWaveform');
+    assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev(' ')), 'togglePlay');
     assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('?', { shift: true })), 'showShortcutHelp');
     assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('k', { ctrl: true })), 'openCommandPalette');
     assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('g')), 'toggleSnap');
@@ -153,6 +163,31 @@ t('maps FeedBack Native timeline and grid shortcuts', () => {
     assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('ArrowRight', { alt: true })), 'nextNote');
     assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('PageDown', { ctrl: true })), 'nextGrid');
     assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('ArrowLeft', { ctrl: true, alt: true })), 'prevAnchor');
+    // Context chords stay out of the resolver: alt+arrow is prevNote/nextNote
+    // (the loop block in onKeyDown overrides when S.barSel), and Alt+Shift+
+    // arrows are unbound in note mode (their owners are the onKeyDown blocks).
+    assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('ArrowLeft', { alt: true })), 'prevNote');
+    assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('ArrowRight', { alt: true })), 'nextNote');
+    assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('ArrowLeft', { alt: true, shift: true })), null);
+    assert.strictEqual(api._editorFeedbackCommandForKeyPure(ev('ArrowRight', { alt: true, shift: true })), null);
+});
+
+t('ready panel rows never advertise a duplicated key per profile', () => {
+    // Every ready row is a clickable panel button; two clickable rows sharing a
+    // displayed chord would hide which one wins (the context rows fix this with
+    // the ` (...)` qualifier). Planned rows are disabled, so their keys are
+    // informational and out of scope (e.g. Shift+G collides in Logical today).
+    for (const profile of ['feedback', 'logical', 'cableton', 'eof']) {
+        const byKey = new Map();
+        for (const row of api._editorShortcutRowsPure(profile)) {
+            if (row.status !== 'ready' || !row.key) continue;
+            if (!byKey.has(row.key)) byKey.set(row.key, []);
+            byKey.get(row.key).push(row.id);
+        }
+        const dupes = [...byKey.entries()].filter(([, ids]) => ids.length > 1)
+            .map(([key, ids]) => `${key} → ${ids.join(', ')}`);
+        assert.deepStrictEqual(dupes, [], `${profile}: duplicated displayed keys`);
+    }
 });
 
 t('maps FeedBack Native note and technique shortcuts', () => {
@@ -230,6 +265,8 @@ t('maps EOF Tempo Map commands by active mode', () => {
 t('EOF port: help, select-like, fret aliases, and numpad bookmarks land', () => {
     // F1 = Help (EOF), beside the universal '?'.
     assert.strictEqual(api._editorEofCommandForKeyPure(ev('F1')), 'showShortcutHelp');
+    // Spacebar = play/pause (EOF)
+    assert.strictEqual(api._editorEofCommandForKeyPure(ev(' ')), 'togglePlay');
     // Shift+L = precise select-like → our one select-matching command; follow
     // has no EOF key (EOF just auto-scrolls) and is button/View-menu only there.
     assert.strictEqual(api._editorEofCommandForKeyPure(ev('l', { shift: true })), 'selectLike');

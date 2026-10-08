@@ -133,5 +133,15 @@ t('ordinary commands get no hint, so the panel runs them directly', () => {
     assert.strictEqual(_editorShortcutPanelHintPure(''), null);
 });
 
+// Context rows keep the same run-first<->fallback shape as the digit ranges,
+// so a click outside their context is instructional instead of inert.
+t('context nudge rows hint when clicked out of context', () => {
+    assert.ok(/tracks overview.*track selected/i.test(_editorShortcutPanelHintPure('nudgeTrackOffsetLeft')));
+    assert.ok(/tracks overview.*track selected/i.test(_editorShortcutPanelHintPure('nudgeTrackOffsetRight')));
+    for (const id of ['nudgeLoopStartLeft', 'nudgeLoopStartRight', 'nudgeLoopEndLeft', 'nudgeLoopEndRight']) {
+        assert.ok(/loop selection/i.test(_editorShortcutPanelHintPure(id)), `${id} hints an active loop`);
+    }
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

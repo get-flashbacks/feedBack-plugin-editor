@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Keybinds: Space and the context nudges are now shortcut-registry commands.**
+  Play/Pause (Space), per-track offset nudge (Alt+Shift+←/→ in Parts view),
+  and loop edge nudge (Alt+←/→ for start, Alt+Shift+←/→ for end) now appear in
+  the shortcut help panel (?) and the command palette (Ctrl+K) with
+  profile-aware, context-qualified key labels. The keyboard chords keep their
+  context guards in `onKeyDown`, which owns dispatch; the panel and palette run
+  the same commands by id.
+
 ### Security
 
 - **Added an XML entity-expansion ("billion laughs") guard.** `ET.parse()`
@@ -38,7 +48,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directory is served back same-origin — a file named e.g. `cover.svg` with an
   embedded `<script>`/`onload` payload would execute in the app's origin when
   served. Added extension allow-lists (mirroring the one `import-stems`
-  already used) and reject anything else with 400 before writing to disk.
+   already used) and reject anything else with 400 before writing to disk.
+
+### Fixed
+
+- **Keys-span lint names the configured threshold interval correctly (18→11th, 19→12th).**
+  With a max hand span above the default 16 (a 10th), the advisory detail read
+  "beyond a 12th/13th" instead of "11th/12th": `maxSpan - 6` only lands for 16 —
+  compound intervals need `7*octaves + simpleDegree` (the tritone counts as an
+  augmented 4th), per the 16→10th / 18→11th / 19→12th mapping. Added
+  `_spanToIntervalNumberPure` in `src/playability-lint.js`, covered by
+  `tests/keys_lint.test.mjs`.
 
 ### Added
 

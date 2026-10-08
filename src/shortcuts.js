@@ -64,6 +64,7 @@ const EDITOR_SHORTCUT_COMMANDS = Object.freeze([
     { id: 'toggleGuideClap', label: 'Toggle guide voices', group: 'Preview', status: 'ready', keys: { feedback: 'C', logical: 'Ctrl+Shift+C', eof: 'C' } },
     { id: 'toggleMetronome', label: 'Toggle metronome click', group: 'Preview', status: 'ready', keys: { feedback: '', logical: 'K', cableton: 'O', eof: '' } },
     { id: 'toggleMixer', label: 'Toggle Mixer panel', group: 'Preview', status: 'ready', keys: { feedback: 'Shift+C', eof: 'Shift+C' } },
+    { id: 'togglePlay', label: 'Play / pause', group: 'Preview', status: 'ready', keys: { feedback: 'Space', eof: 'Space' } },
     { id: 'togglePlayAllTracks', label: 'Play all tracks (band mode)', group: 'Preview', status: 'ready', keys: { feedback: '', eof: '' } },
     { id: 'manageStemTracks', label: 'Audio tracks (import / pair stems)', group: 'Preview', status: 'ready', keys: { feedback: '', eof: '' } },
     { id: 'soloMyStem', label: 'Solo my source track (paired stem)', group: 'Preview', status: 'ready', keys: { feedback: '', eof: '' } },
@@ -100,6 +101,16 @@ const EDITOR_SHORTCUT_COMMANDS = Object.freeze([
     { id: 'nextAnchor', label: 'Jump to next anchor', group: 'Timeline', status: 'ready', keys: { feedback: 'Ctrl+Alt+Right', eof: 'Alt+Page Down' } },
     { id: 'gotoBookmarkDigit', label: 'Jump to bookmark 1-9', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+1-9', eof: 'Numpad 1-9 / Alt+1-9' } },
     { id: 'setBookmarkDigit', label: 'Set / clear bookmark 1-9 at cursor', group: 'Timeline', status: 'ready', keys: { feedback: 'Shift+Alt+1-9', eof: 'Ctrl+Numpad 1-9 / Shift+Alt+1-9' } },
+    // Context-dependent chords: the onKeyDown blocks own the keyboard (see
+    // input.js), so the resolver leaves these unbound and these rows are what
+    // surface them in the panel / palette. The ` (...)` qualifier is the house
+    // context-suffix idiom (ruler.js strips it back when it cites a key).
+    { id: 'nudgeTrackOffsetLeft', label: 'Nudge selected track offset earlier', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Shift+Left (Parts view)', eof: '' } },
+    { id: 'nudgeTrackOffsetRight', label: 'Nudge selected track offset later', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Shift+Right (Parts view)', eof: '' } },
+    { id: 'nudgeLoopStartLeft', label: 'Nudge loop start earlier', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Left (loop selected)', eof: '' } },
+    { id: 'nudgeLoopStartRight', label: 'Nudge loop start later', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Right (loop selected)', eof: '' } },
+    { id: 'nudgeLoopEndLeft', label: 'Nudge loop end earlier', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Shift+Left (loop selected)', eof: '' } },
+    { id: 'nudgeLoopEndRight', label: 'Nudge loop end later', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Shift+Right (loop selected)', eof: '' } },
     { id: 'shortenSustain', label: 'Shorten selected sustain', group: 'Grid and sustain', status: 'ready', keys: { feedback: '[', eof: '[ / Wheel down' } },
     { id: 'lengthenSustain', label: 'Lengthen selected sustain', group: 'Grid and sustain', status: 'ready', keys: { feedback: ']', eof: '] / Wheel up' } },
     { id: 'toggleSnap', label: 'Toggle snap on/off', group: 'Grid and sustain', status: 'ready', keys: { feedback: 'G', logical: 'Shift+G', cableton: 'Ctrl+4', eof: '' } },
@@ -268,6 +279,7 @@ export function _editorEofCommandForKeyPure(e, mode) {
     if (sig === 'F1') return 'showShortcutHelp';                 // EOF: F1 = Help
     if (sig === 'F2') return 'save';
     if (sig === 'F5') return 'toggleWaveform';
+    if (plain && key === ' ') return 'togglePlay';
     if (plain && key === 'c') return 'toggleGuideClap';
     if (shift && key === 'c') return 'toggleMixer';
     if (alt && key === 'b') return 'toggleLoopAB';
@@ -550,6 +562,7 @@ export function _editorFeedbackCommandForKeyPure(e, mode) {
     if (plain && key === 't') return 'toggleTempoMap';
     if (ctrl && key === 's') return 'save';
     if (plain && key === 'w') return 'toggleWaveform';
+    if (plain && key === ' ') return 'togglePlay';
     if (plain && key === 'c') return 'toggleGuideClap';
     if (shift && key === 'c') return 'toggleMixer';
     if (alt && key === 'b') return 'toggleLoopAB';
@@ -566,6 +579,9 @@ export function _editorFeedbackCommandForKeyPure(e, mode) {
     if (sig === 'Ctrl+PageDown') return 'nextGrid';
     if (ctrlAlt && e.key === 'ArrowLeft') return 'prevAnchor';
     if (ctrlAlt && e.key === 'ArrowRight') return 'nextAnchor';
+    // The track-offset (Parts view) and loop-edge chords are NOT resolved here:
+    // those context guards live in onKeyDown's blocks, and alt+arrow belongs
+    // to prevNote/nextNote above — resolving them would shadow those.
     if (plain && e.key === 'ArrowLeft') return 'nudgeTimeLeft';
     if (plain && e.key === 'ArrowRight') return 'nudgeTimeRight';
     if (plain && key === 'g') return 'toggleSnap';
