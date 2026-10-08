@@ -498,31 +498,36 @@ function currentModel() {
         });
 }
 
-function dispatch(d) {
+const _dispatchHandlers = {
+    cmd: d => _editorRunEofCommand(d.cmd),
+    tb: d => toggleToolbar(d.tb),
+    tbPreset: d => applyToolbarPreset(d.tbPreset),
+    tbReset: d => resetToolbarLayout(),
+    loopSnap: d => editorSetLoopSnapMode(d.loopSnap),
+    scoreStaff: d => editorSetTabViewStaff(d.scoreStaff),
+    loopClear: d => _clearBarSelection(),
+    guideVoice: d => _editorSetGuideVoiceMode(d.guideVoice),
+    gmVoice: d => editorSetGmVoice(d.gmKind, d.gmVoice),
+    maxHandSpan: d => window.editorSetKeysMaxSpan?.(d.maxHandSpan),
+    fn: d => {
+        if (d.fn === '__swapProfile') {
+            // Cycle the four profiles in a fixed order; the two selects follow.
+            const order = ['feedback', 'logical', 'cableton', 'eof'];
+            const next = order[(order.indexOf(editorShortcutProfile) + 1) % order.length];
+            window.editorSetShortcutProfile?.(next);
+            const sel = document.getElementById('editor-shortcut-profile');
+            if (sel) sel.value = next;
+            return;
+        }
+        window[d.fn]?.();
+    },
+};
+
+export function dispatch(d) {
     if (!d) return;
-    if (d.cmd) { _editorRunEofCommand(d.cmd); return; }
-    if (d.tb) { toggleToolbar(d.tb); return; }
-    if (d.tbPreset) { applyToolbarPreset(d.tbPreset); return; }
-    if (d.tbReset) { resetToolbarLayout(); return; }
-    if (d.loopSnap) { editorSetLoopSnapMode(d.loopSnap); return; }
-    if (d.scoreStaff) { editorSetTabViewStaff(d.scoreStaff); return; }
-    if (d.loopClear) { _clearBarSelection(); return; }
-    if (d.guideVoice) { _editorSetGuideVoiceMode(d.guideVoice); return; }
-    if (d.gmVoice != null) { editorSetGmVoice(d.gmKind, d.gmVoice); return; }
-    if (d.maxHandSpan != null) {
-        if (typeof window.editorSetKeysMaxSpan === 'function') window.editorSetKeysMaxSpan(d.maxHandSpan);
-        return;
+    for (const [key, handler] of Object.entries(_dispatchHandlers)) {
+        if (d[key] != null) { handler(d); return; }
     }
-    if (d.fn === '__swapProfile') {
-        // Cycle the four profiles in a fixed order; the two selects follow.
-        const order = ['feedback', 'logical', 'cableton', 'eof'];
-        const next = order[(order.indexOf(editorShortcutProfile) + 1) % order.length];
-        if (typeof window.editorSetShortcutProfile === 'function') window.editorSetShortcutProfile(next);
-        const sel = document.getElementById('editor-shortcut-profile');
-        if (sel) sel.value = next;
-        return;
-    }
-    if (typeof window[d.fn] === 'function') window[d.fn]();
 }
 
 // Dropdown content renders at OPEN time (accelerators/gates read live state).

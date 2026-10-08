@@ -18,8 +18,10 @@ globalThis.document = globalThis.document || {
 globalThis.localStorage = globalThis.localStorage || { getItem: () => null, setItem: () => {} };
 globalThis.window = globalThis.window || globalThis;
 
-const { EDITOR_MENUS, _menuModelPure } = await import('../src/menu-bar.js');
-const { _editorShortcutRowsPure } = await import('../src/shortcuts.js');
+const menuBar = await import('../src/menu-bar.js');
+const { EDITOR_MENUS, _menuModelPure, dispatch } = menuBar;
+const shortcuts = await import('../src/shortcuts.js');
+const { _editorShortcutRowsPure, editorSetShortcutProfile } = shortcuts;
 
 let pass = 0, fail = 0;
 function t(name, fn) {
@@ -184,6 +186,26 @@ t('Scroll in Play degrades to unchecked+enabled for a ctx without the keys', () 
     const it = findSip(CTX);
     assert.ok(it.label.startsWith('  '));
     assert.strictEqual(it.disabled, false);
+});
+
+t('dispatch({ fn: "__swapProfile" }) advances the profile (Help ▸ Shortcut profile)', () => {
+    // The swap payload carries no __swapProfile property — the dispatch table
+    // routes it through the fn handler, which must cycle feedback→logical→…
+    // The handler calls window.editorSetShortcutProfile (wired by main.js),
+    // so stub it with the real setter; the document stub already nulls the
+    // select sync. Live export-let bindings read through the namespace.
+    editorSetShortcutProfile('feedback');
+    const g = globalThis;
+    const orig = g.editorSetShortcutProfile;
+    g.editorSetShortcutProfile = editorSetShortcutProfile;
+    try {
+        dispatch({ fn: '__swapProfile' });
+        assert.strictEqual(shortcuts.editorShortcutProfile, 'logical', 'one dispatch advances one profile step');
+    } finally {
+        if (orig === undefined) delete g.editorSetShortcutProfile;
+        else g.editorSetShortcutProfile = orig;
+        editorSetShortcutProfile('feedback');   // restore for the rest of the suite
+    }
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
