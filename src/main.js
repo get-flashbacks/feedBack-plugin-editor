@@ -1708,7 +1708,7 @@ window.editorSetSwing = (pct) => {
 window.editorSetKeysMaxSpan = (span) => {
     const n = Number.isFinite(span) ? Math.max(12, Math.floor(span)) : 16;
     try { localStorage.setItem('editorKeysMaxSpan', String(n)); } catch (_) {}
-    setStatus(`Max hand span for keys set to ${n} semitones (${n - 6}th)`);
+    setStatus(`Max hand span for keys set to ${n} semitones (${_spanToIntervalNumberPure(n)}th)`);
 };
 window.editorSetSnapEnabled = (enabled) => {
     S.snapEnabled = !!enabled;
