@@ -311,6 +311,10 @@ export async function loadCDLC(filename, options = {}) {
         S.returnToHighway = false;
         S.history = new EditHistory();
         S.lastAction = '';
+        // Reassigning the stack bypasses reset(), so nothing else refreshes the
+        // toolbar: without this the label and Revert still name the previous
+        // song's edit (and Undo/Redo keep the old enabled state).
+        S.history._ui();
         markSessionSaved();
 
         // Reset offset UI so _effectiveAudioOffset() doesn't carry over a
