@@ -40,6 +40,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tests, older embeds) the `onKeyDown` fallback still performs every delete and
   toggle exactly as before.
 
+- **Keybinds: Space and Escape register with the Host shortcut service, and the
+  document listener is down to the keys that cannot be shortcuts (#39/#40).**
+  Play/Pause (Space) and the Escape dismissal ladder join the editing keys on
+  `window.registerShortcut({ ... scope: 'plugin-editor' })`, so the global `?`
+  help panel lists them with a description. Both keep today's behavior: Space is
+  live mid-take (it finalizes the take) and ignored while typing, under a
+  read-only lens, or with the tool palette open; Escape closes the tab preview
+  and user guide, the context menu, the tool palette, a pending tap-tempo run,
+  suggested-fit ghosts, and a barline or note/drum selection in that order,
+  yielding to the overlays that own Escape through their own handler (the
+  in-app text/choice prompts, the anchor sweep and a tempo-zones proposal) and
+  preserving the read-only Tracks overview and mid-take guards, deliberately
+  leaving an unowned Escape to the Host's back-to-library (it calls
+  `preventDefault()` only when it consumed the key). `onKeyDown` now keeps only
+  the gates that genuinely cannot be registry rows — the swallow-all read-only
+  lenses and palette, the Select All policy, the recording gate and the
+  profile-dependent plain tool keys — plus a fallback for the migrated keys that
+  only runs when the Host registry is unavailable (bare unit suites, older
+  embeds). No key is ever handled twice: that fallback stands down the moment
+  `editorShortcutState.registered` flips true.
+
 ### Security
 
 - **Added an XML entity-expansion ("billion laughs") guard.** `ET.parse()`

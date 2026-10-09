@@ -1,10 +1,12 @@
-// Host shortcut bridge (#38). Registers the editor's hardcoded editing keys
-// (Delete / Backspace and the drum G / F / K articulation toggles) with the
-// Host's `window.registerShortcut` API so they surface in the global `?` help
-// panel and are scoped to this screen (`plugin-editor`). The Host dispatches
-// them independently of the plugin's own `document` keydown listener, so each
-// handler re-checks the read-only-lens / recording / mode guards `onKeyDown`
-// applies — the registration is not a licence to act behind a modal.
+// Host shortcut bridge (#38, extended by #39). Registers the editor's
+// hardcoded keys with the Host's `window.registerShortcut` API so they surface
+// in the global `?` help panel and are scoped to this screen (`plugin-editor`):
+// the editing keys (Delete / Backspace and the drum G / F / K articulation
+// toggles), plus the transport Space and the dismissal Escape. The Host
+// dispatches them independently of the plugin's own `document` keydown
+// listener, so each handler re-checks the read-only-lens / recording / mode
+// guards `onKeyDown` applies — the registration is not a licence to act behind
+// a modal.
 //
 // Degrades to a no-op under node / a Host without the API:
 // `registerEditorShortcuts` only flips `editorShortcutState.registered` when
@@ -19,14 +21,18 @@ import { _recState } from './midi-record.js';
 import { _editorIsTypingTarget } from './shortcuts.js';
 import { editorToolPaletteOpen } from './tools.js';
 import { editorShortcutState } from './shortcut-state.js';
-import { _editorDeleteSelection, _editorDrumArticulation } from './input.js';
+import { _zonesActive } from './tempo-zones.js';
+import { _sweepActive } from './anchor-resolve.js';
+import {
+    _editorDeleteSelection, _editorDrumArticulation, _editorEscape, _editorTogglePlayShortcut,
+} from './input.js';
 
 const SCOPE = 'plugin-editor';
 
 // { key, handle } for every registration made by the live injection.
 let _registered = [];
 
-function _lensOpen(id) {
+function _modalShown(id) {
     if (typeof document === 'undefined') return false;
     const el = document.getElementById(id);
     return !!el && !el.classList.contains('hidden');
@@ -42,7 +48,7 @@ function _editorShortcutAllowed(e) {
     if (typeof document !== 'undefined') {
         const screen = document.getElementById('plugin-editor');
         if (!screen || !screen.classList.contains('active')) return false;
-        if (_lensOpen('editor-tab-preview-modal') || _lensOpen('editor-user-guide-modal')) return false;
+        if (_modalShown('editor-tab-preview-modal') || _modalShown('editor-user-guide-modal')) return false;
     }
     let paletteOpen = false;
     try { paletteOpen = editorToolPaletteOpen(); } catch (_) { paletteOpen = false; }
@@ -78,12 +84,40 @@ function _onDrumShortcut(kind) {
     };
 }
 
+// Space — transport. `_editorTogglePlayShortcut` carries the screen / typing /
+// lens / palette guard itself (and no recording gate: Space finalizes a take),
+// so the handler only keeps modifier chords out of the plain-key registration.
+function _onSpaceShortcut(e) {
+    if (_hasModifier(e)) return;
+    if (_editorTogglePlayShortcut(e)) e.preventDefault();
+}
+
+// Escape — the dismissal ladder. It does NOT use `_editorShortcutAllowed`: that
+// guard bails while a read-only lens is open, but closing that lens is exactly
+// Escape's job. It must however yield to every overlay that owns Escape through
+// its OWN handler: the host-owned transient modals (add-note / load / command
+// palette, closed by main.js's import-time listener) and the in-app prompts
+// (ui.js) plus the anchor sweep and tempo-zones proposal, which took the key
+// via a capture-phase `stopPropagation()` listener that used to keep onKeyDown
+// out — the host dispatches independently of DOM propagation, so this handler
+// is now the one that must not clear the selection behind them.
+function _onEscapeShortcut(e) {
+    if (_hasModifier(e)) return;
+    if (_modalShown('editor-add-note-dialog') || _modalShown('editor-load-modal')
+            || _modalShown('editor-command-palette') || _modalShown('editor-text-prompt')
+            || _modalShown('editor-choice-prompt')) return;
+    if (_zonesActive() || _sweepActive()) return;
+    if (_editorEscape(e)) e.preventDefault();
+}
+
 const _SHORTCUT_SPECS = [
     { key: 'Delete', description: 'Delete the current selection', handler: _onDeleteShortcut },
     { key: 'Backspace', description: 'Delete the current selection', handler: _onDeleteShortcut },
     { key: 'g', description: 'Toggle ghost notes on the selected drum hits', handler: _onDrumShortcut('g') },
     { key: 'f', description: 'Toggle flam on the selected drum hits', handler: _onDrumShortcut('f') },
     { key: 'k', description: 'Toggle choke on the selected cymbals', handler: _onDrumShortcut('k') },
+    { key: 'Space', description: 'Play / pause', handler: _onSpaceShortcut },
+    { key: 'Escape', description: 'Close the top layer, or clear the selection', handler: _onEscapeShortcut },
 ];
 
 export function registerEditorShortcuts() {

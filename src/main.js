@@ -2392,10 +2392,10 @@ function init() {
     canvas.addEventListener('wheel', onWheel, { passive: false });
     canvas.addEventListener('contextmenu', onContextMenu);
     _globalListeners.add(document, 'keydown', onKeyDown);
-    // Hand the editing keys (Delete/Backspace, drum G/F/K) to the Host's
-    // shortcut registry so they surface in the `?` panel and stay scoped to
-    // this screen (#38). No-op without the Host API; input.js keeps its own
-    // fallback path while `editorShortcutState.registered` is false.
+    // Hand the editor's shortcuts (Delete/Backspace, drum G/F/K, Space, Escape)
+    // to the Host's shortcut registry so they surface in the `?` panel and stay
+    // scoped to this screen (#38/#39/#40). No-op without the Host API; input.js
+    // keeps its own fallback path while `editorShortcutState.registered` is false.
     registerEditorShortcuts();
 
     // Prevent middle-click paste
