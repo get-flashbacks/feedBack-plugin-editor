@@ -99,6 +99,7 @@ import {
     _editorSnapStepSeconds, editorRunShortcutCommand, editorToggleEntryPreview,
     editorToggleShortcutPanel, onContextMenu, onKeyDown
 } from './input.js';
+import { registerEditorShortcuts, unregisterEditorShortcuts } from './shortcut-registry.js';
 import { editorCloseCommandPalette, initCommandPalette } from './command-palette.js';
 import {
     editorAddString, editorCanvasStringAdd, editorCanvasStringRemove,
@@ -921,6 +922,12 @@ function _teardownScreenSoft() {
     // swept, so a re-injection can't strand guardSessionTransition.
     try { dismissSessionPrompt(); } catch (_) {}
     _globalListeners.removeAll();
+    // Release the Host-registered editing keys (#38) so a re-injection can't
+    // stack a stale shortcut on the same scope. typeof-guarded for the sliced
+    // boot-teardown suite, which stubs only what it names.
+    if (typeof unregisterEditorShortcuts === 'function') {
+        try { unregisterEditorShortcuts(); } catch (_) {}
+    }
     // Stop any playback this injection owns — the audio graph outlives the
     // DOM, so a replaced screen would otherwise keep sounding.
     teardownAudio();  // stops playback + cancels the rAF loop (src/audio.js owns both)
@@ -2385,6 +2392,11 @@ function init() {
     canvas.addEventListener('wheel', onWheel, { passive: false });
     canvas.addEventListener('contextmenu', onContextMenu);
     _globalListeners.add(document, 'keydown', onKeyDown);
+    // Hand the editing keys (Delete/Backspace, drum G/F/K) to the Host's
+    // shortcut registry so they surface in the `?` panel and stay scoped to
+    // this screen (#38). No-op without the Host API; input.js keeps its own
+    // fallback path while `editorShortcutState.registered` is false.
+    registerEditorShortcuts();
 
     // Prevent middle-click paste
     canvas.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefault(); });
