@@ -29,6 +29,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   context guards in `onKeyDown`, which owns dispatch; the panel and palette run
   the same commands by id.
 
+- **Keybinds: the editing keys (Delete / Backspace, drum G / F / K) now
+  register with the Host shortcut service (#38).** The five keys are handed to
+  `window.registerShortcut({ key, handler, description, scope })` under the
+  `plugin-editor` scope, so the global `?` help panel lists them. The handlers
+  keep the same in-editor guards (text-field focus, read-only lenses) and
+  unregister on teardown. The three drum articulations remain shadowed in
+  `onKeyDown` so their host registrations never claim a plain `f` / `g` / `k`
+  that the active profile owns; when the Host API is unavailable (bare unit
+  tests, older embeds) the `onKeyDown` fallback still performs every delete and
+  toggle exactly as before.
+
 ### Security
 
 - **Added an XML entity-expansion ("billion laughs") guard.** `ET.parse()`

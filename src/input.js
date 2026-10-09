@@ -45,6 +45,7 @@ import { _tourNoteAction } from './tour.js';
 import { _signpostNote } from './signposts.js';
 import { _editorClampPopoverPure, _editorPromptText, setStatus } from './ui.js';
 import { host } from './host.js';
+import { editorShortcutState } from './shortcut-state.js';
 
 export let editorWaveformVisible = true;
 // ════════════════════════════════════════════════════════════════════
@@ -1788,6 +1789,105 @@ export function _editorSelectAllPolicyPure(e) {
     return isTextEditor ? 'text' : 'editor';
 }
 
+// Delete / Backspace — the ordered first-match ladder, shared by onKeyDown's
+// fallback path and the host `registerShortcut` handler (#38). Returns true
+// when it consumed the key (the caller then preventDefault()s); false leaves
+// the key to the browser / downstream owners. The Tracks-overview region rung
+// is the one "claim" case: its verdict is `host.partsViewRegionDelete()`'s, so
+// no selected region keeps the key ignored like the rest of the overview.
+export function _editorDeleteSelection(e) {
+    if (e.key !== 'Delete' && e.key !== 'Backspace') return false;
+    if (e.target && typeof e.target.matches === 'function'
+            && e.target.matches('input, select, textarea')) return false;
+    // Tracks overview — this surface's only editable object is the region block.
+    if (S.partsViewMode) return host.partsViewRegionDelete();
+    // Tempo-map mode: delete the selected barline(s) — bulk when a
+    // multi-selection exists (PR 5a), else the single focus. With nothing
+    // selected, mirror the profile dispatch's hint (and consume the key) so a
+    // host-dispatched Delete isn't silently inert where the fallback path
+    // advertised the fix.
+    if (S.tempoMapMode) {
+        if (S.tempoSel >= 0 || (S.tempoSelMulti && S.tempoSelMulti.size)) {
+            _tempoDeleteSelection();
+        } else {
+            setStatus('Select a Tempo Map barline first.');
+        }
+        return true;
+    }
+    // Anchor-lane: delete the selected anchor.
+    if (S.anchorSel && !S.drumEditMode && !S.tempoMapMode) {
+        const arr = _currentAnchorArr();
+        if (arr && Array.isArray(arr.anchors_user)
+                && arr.anchors_user.includes(S.anchorSel)) {
+            S.history.exec(new RemoveAnchorCmd(S.currentArr, S.anchorSel));
+            S.anchorSel = null;
+            host.draw();
+            return true;
+        }
+    }
+    // Handshape-lane: delete the selected handshape.
+    if (S.handshapeSel && !S.drumEditMode && !S.tempoMapMode) {
+        const arr = _currentAnchorArr();
+        if (arr && Array.isArray(arr.handshapes)
+                && arr.handshapes.includes(S.handshapeSel)) {
+            S.history.exec(new RemoveHandshapeCmd(S.currentArr, S.handshapeSel));
+            // Drop any in-flight drag on the just-deleted handshape so a
+            // trailing mouseup can't enqueue a move/resize for a detached
+            // object (and falsely bump the dirty count).
+            if (S.drag && S.drag.type === 'handshape' && S.drag.hs === S.handshapeSel) {
+                S.drag = null;
+            }
+            S.handshapeSel = null;
+            host.draw();
+            return true;
+        }
+    }
+    // Tone-lane: delete the selected tone-change marker. Mirrors the note-path
+    // gates; an old tone selection must not hijack the key in drum/tempo mode.
+    if (S.toneSel && !S.drumEditMode && !S.tempoMapMode) {
+        const arr = _currentToneArr();
+        if (arr && arr.tones && Array.isArray(arr.tones.changes)
+                && arr.tones.changes.includes(S.toneSel)) {
+            S.history.exec(new RemoveToneChangeCmd(S.currentArr, S.toneSel));
+            S.toneSel = null;
+            host.draw();
+            return true;
+        }
+    }
+    // Drum-edit mode: delete selected drum hits as one undoable step.
+    if (S.drumEditMode && S.drumSel.size && S.drumTab) {
+        _drumEditorDeleteSelection();
+        host.draw();
+        return true;
+    }
+    // Guard: in drum-edit mode S.sel may still hold a prior guitar/keys
+    // selection from before mode entry; deleting those notes while the user
+    // thinks they're editing drums would be surprising.
+    if (!S.drumEditMode && !S.tempoMapMode && S.sel.size) {
+        S.history.exec(new DeleteNotesCmd([...S.sel]));
+        host.draw();
+        host.updateStatus();
+        return true;
+    }
+    return false;
+}
+
+// G / F / K — drum-edit articulation toggles (ghost / flam / choke). The
+// drum-mode guard lives here so the onKeyDown fallback and the host handler
+// share one precedence rule over the shortcut-profile dispatch (plain f →
+// editFret, g → toggleSnap, k → cyclePickDirection). Returns true when it
+// consumed the key. Outside a drum selection — or as a modifier chord the
+// profile owns (Ctrl+F editFret, Shift+G toggleGridDisplay, …) — it is a no-op,
+// letting the key fall through to its profile meaning.
+export function _editorDrumArticulation(kind, e) {
+    if (kind !== 'g' && kind !== 'f' && kind !== 'k') return false;
+    if (e && (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey)) return false;
+    if (!S.drumEditMode || !S.drumSel.size || !S.drumTab) return false;
+    _drumEditorToggleArticulation(kind);
+    host.draw();
+    return true;
+}
+
 export function onKeyDown(e) {
     // Only handle when editor screen is visible
     const screen = document.getElementById('plugin-editor');
@@ -2008,11 +2108,27 @@ export function onKeyDown(e) {
         // note-edit on the hidden chart. parts-view owns the resolution
         // (which part, which kind) through the host table; false = no region
         // selected, and the key stays ignored like everything else here.
+        // While the host registry owns the key (#38) its handler runs the
+        // same rung, so this listener must not also consume it.
         if ((e.key === 'Delete' || e.key === 'Backspace')
                 && !e.target.matches('input, select, textarea')
+                && !editorShortcutState.registered
                 && host.partsViewRegionDelete()) {
             e.preventDefault();
         }
+        return;
+    }
+
+    // When the host registry owns the editing keys (#38) it dispatches the
+    // PLAIN Delete/Backspace itself; skip this listener's handling so the
+    // ladder can't also run — the tempo-map profile dispatch maps plain Delete
+    // to tempoDeleteSync, which would double-delete. Modifier chords are NOT
+    // the host's: Shift+Delete is the EOF "Cut", so let those fall through to
+    // the profile dispatch below. G/F/K stay below: outside a drum selection
+    // they are still profile keys (f → editFret, g → toggleSnap).
+    if (editorShortcutState.registered
+            && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey
+            && (e.key === 'Delete' || e.key === 'Backspace')) {
         return;
     }
 
@@ -2020,14 +2136,16 @@ export function onKeyDown(e) {
     // dispatch: a plain 'f' in drum-edit mode must toggle flam, not resolve to
     // the FeedBack/EOF `editFret` command (which claims plain 'f'). Only fires
     // with a drum selection; otherwise falls through to the dispatch below.
+    // G/F/K are host-registered (#38), so when the registry is active this
+    // block only claims the key — the handler does the toggle. Without a host
+    // registry it runs the toggle directly so the editor still works.
     if (S.drumEditMode && S.drumSel.size && S.drumTab
         && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey
         && !e.target.matches('input, select, textarea')) {
         const dk = e.key.toLowerCase();
         if (dk === 'g' || dk === 'f' || dk === 'k') {
             e.preventDefault();
-            _drumEditorToggleArticulation(dk);
-            host.draw();
+            if (!editorShortcutState.registered) _editorDrumArticulation(dk);
             return;
         }
         // Velocity quick-sets: A = accent, N = normal. In drum mode these
@@ -2135,90 +2253,13 @@ export function onKeyDown(e) {
         return;
     }
 
-    if (e.key === 'Delete' || e.key === 'Backspace') {
-        // (Region-block delete lives in the partsViewMode gate above — this
-        // ladder is only reachable outside the Tracks overview.)
-        // Tempo-map mode: delete the selected barline(s) — bulk when a
-        // multi-selection exists (PR 5a), else the single focus.
-        if (S.tempoMapMode && (S.tempoSel >= 0 || (S.tempoSelMulti && S.tempoSelMulti.size)) &&
-                !e.target.matches('input, select, textarea')) {
-            e.preventDefault();
-            _tempoDeleteSelection();
-            return;
-        }
-        // Anchor-lane: delete the selected anchor. Same focus / mode
-        // gates as the tone-lane Del path.
-        if (S.anchorSel && !S.drumEditMode && !S.tempoMapMode &&
-                !e.target.matches('input, select, textarea')) {
-            const arr = _currentAnchorArr();
-            if (arr && Array.isArray(arr.anchors_user)
-                    && arr.anchors_user.includes(S.anchorSel)) {
-                e.preventDefault();
-                S.history.exec(new RemoveAnchorCmd(S.currentArr, S.anchorSel));
-                S.anchorSel = null;
-                host.draw();
-                return;
-            }
-        }
-        // Handshape-lane: delete the selected handshape. Same gates.
-        if (S.handshapeSel && !S.drumEditMode && !S.tempoMapMode &&
-                !e.target.matches('input, select, textarea')) {
-            const arr = _currentAnchorArr();
-            if (arr && Array.isArray(arr.handshapes)
-                    && arr.handshapes.includes(S.handshapeSel)) {
-                e.preventDefault();
-                S.history.exec(new RemoveHandshapeCmd(S.currentArr, S.handshapeSel));
-                // Drop any in-flight drag on the just-deleted handshape so a
-                // trailing mouseup can't enqueue a move/resize for a detached
-                // object (and falsely bump the dirty count).
-                if (S.drag && S.drag.type === 'handshape' && S.drag.hs === S.handshapeSel) {
-                    S.drag = null;
-                }
-                S.handshapeSel = null;
-                host.draw();
-                return;
-            }
-        }
-        // Tone-lane: delete the selected tone-change marker. Same
-        // input-focus guard as the note-delete path below. Skip when
-        // drum-edit or tempo-map mode is active — those modes own
-        // Delete for their own selections, and `S.toneSel` isn't
-        // cleared when entering them, so an old tone selection could
-        // otherwise hijack the keypress.
-        if (S.toneSel && !S.drumEditMode && !S.tempoMapMode &&
-                !e.target.matches('input, select, textarea')) {
-            const arr = _currentToneArr();
-            if (arr && arr.tones && Array.isArray(arr.tones.changes)
-                    && arr.tones.changes.includes(S.toneSel)) {
-                e.preventDefault();
-                S.history.exec(new RemoveToneChangeCmd(S.currentArr, S.toneSel));
-                S.toneSel = null;
-                host.draw();
-                return;
-            }
-        }
-        // Drum-edit mode: delete selected drum hits via DeleteDrumHitsCmd,
-        // so the delete undoes/redoes like the note-delete path below.
-        // Guard against focus being inside a form control (mirrors the note-
-        // delete path below) so typing in a text input doesn't delete hits.
-        if (S.drumEditMode && S.drumSel.size && S.drumTab &&
-                !e.target.matches('input, select, textarea')) {
-            e.preventDefault();
-            _drumEditorDeleteSelection();
-            host.draw();
-            return;
-        }
-        // Guard: in drum-edit mode S.sel may still hold a prior guitar/keys
-        // selection from before mode entry; deleting those notes while the
-        // user thinks they're editing drums would be surprising. Only run
-        // the guitar/keys delete path when drum-edit mode is inactive.
-        if (!S.drumEditMode && !S.tempoMapMode && S.sel.size && !e.target.matches('input, select, textarea')) {
-            e.preventDefault();
-            S.history.exec(new DeleteNotesCmd([...S.sel]));
-            host.draw();
-            host.updateStatus();
-            return;
-        }
+    // Delete / Backspace — the ladder moved to _editorDeleteSelection so the
+    // host `registerShortcut` handler and this fallback path share one body.
+    // When the host registry is active the early return above already claimed
+    // the key, so this only runs with no host registry (older Host / node).
+    if (_editorDeleteSelection(e)) {
+        e.preventDefault();
+        return;
     }
     // Ctrl+Alt+Z — undo to the last checkpoint. Must precede the plain Ctrl+Z
     // below (which doesn't exclude Alt, so it would otherwise swallow this).
