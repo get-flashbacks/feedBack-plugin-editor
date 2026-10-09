@@ -1908,26 +1908,128 @@ export function _editorDrumArticulation(kind, e) {
     return true;
 }
 
+// Escape — the ordered first-match ladder, shared by onKeyDown's fallback path
+// and the Host `registerShortcut` handler (#39). Returns true when it consumed
+// the key (the caller then preventDefault()s); false leaves Escape downstream —
+// for the Host that is its own back-to-library. Owners, top to bottom, in the
+// pre-#39 onKeyDown order: the read-only Tab-preview and User-guide lenses, the
+// right-click context/section menu, the tool palette, then — past the parts-view
+// gate and the recording gate that used to sit at `_recState === 'recording'` —
+// a pending tap-tempo run, suggested-fit ghosts, a barline multi-selection, and
+// finally the note/drum selection. Only the pre-existing lens/menu/palette
+// closes ignore the focused element; the mode-specific rungs below keep the
+// original `!typing` guard, so it sits after the tap-tempo run, not at the top.
+// The parts-view and recording gates are load-bearing: a read-only Tracks
+// overview and a live take ignore Escape exactly as they did before.
+export function _editorEscape(e) {
+    if (!e || (e.key !== 'Escape' && e.code !== 'Escape')) return false;
+
+    const tabPreview = document.getElementById('editor-tab-preview-modal');
+    if (tabPreview && !tabPreview.classList.contains('hidden')) {
+        window.editorHideTabPreview();
+        return true;
+    }
+    const guide = document.getElementById('editor-user-guide-modal');
+    if (guide && !guide.classList.contains('hidden')) {
+        window.editorToggleUserGuide(false);
+        return true;
+    }
+    const ctxMenu = document.getElementById('editor-context-menu');
+    if (ctxMenu && !ctxMenu.classList.contains('hidden')) {
+        hideContextMenu();
+        return true;
+    }
+    if (editorToolPaletteOpen()) {
+        editorCloseToolPalette();
+        return true;
+    }
+    if (S.partsViewMode) return false;
+    if (_recState === 'recording') return false;
+    if (_tapTempoHandleKey(e)) return true;
+    if (e.target && typeof e.target.matches === 'function'
+            && e.target.matches('input, select, textarea')) return false;
+    if (S.tempoMapMode && _suggestActive()) {
+        _suggestDismiss();
+        host.updateBPMDisplay();   // retire the Accept Whole Fit button too
+        host.draw();
+        setStatus('Suggestions dismissed');
+        return true;
+    }
+    if (S.tempoMapMode && S.tempoSelMulti && S.tempoSelMulti.size) {
+        S.tempoSelMulti.clear();
+        host.draw();
+        setStatus('Selection cleared');
+        return true;
+    }
+    if (!S.tempoMapMode && (S.sel.size || (S.drumSel && S.drumSel.size))) {
+        S.sel.clear();
+        if (S.drumSel) S.drumSel.clear();
+        _renderInspector();
+        host.draw();
+        setStatus('Selection cleared');
+        return true;
+    }
+    return false;
+}
+
+// Space — play/pause (also finalizes an in-flight take). Shared by onKeyDown's
+// fallback path and the Host `registerShortcut` handler (#39). The read-only
+// lenses and the tool palette swallow it and a text field ignores it, but it is
+// deliberately live mid-take because `window.editorTogglePlay` routes the stop
+// through `editorStopRecordMidi` — the recording check the editing keys carry is
+// absent here. Returns true when it acted.
+export function _editorTogglePlayShortcut(e) {
+    // The Host matches special keys on `e.code` and may hand the handler either
+    // the raw event (`e.key === ' '`) or a token-shaped one, so accept both.
+    if (!e || (e.key !== ' ' && e.key !== 'Space' && e.code !== 'Space')) return false;
+    if (_editorIsTypingTarget(e)) return false;
+    if (typeof document !== 'undefined') {
+        const screen = document.getElementById('plugin-editor');
+        if (!screen || !screen.classList.contains('active')) return false;
+        const tabPreview = document.getElementById('editor-tab-preview-modal');
+        if (tabPreview && !tabPreview.classList.contains('hidden')) return false;
+        const guide = document.getElementById('editor-user-guide-modal');
+        if (guide && !guide.classList.contains('hidden')) return false;
+    }
+    let paletteOpen = false;
+    try { paletteOpen = editorToolPaletteOpen(); } catch (_) { paletteOpen = false; }
+    if (paletteOpen) return false;
+    _editorRunEofCommand('togglePlay');
+    return true;
+}
+
+// The document-level keydown fallback. Every key covered by the Host shortcut
+// migration (#37–#40) is registered through `window.registerShortcut` when the
+// Host API is present (shortcut-registry.js) and stands down here by reading
+// `editorShortcutState.registered`; this listener then covers the compatibility
+// path (a Host without the API / the unit suites). The branches that remain are
+// the ones that genuinely cannot be registry rows: mode/surface policy that
+// applies to every key (read-only lens swallow, Select All, recording), and the
+// plain-key tool keys whose meaning depends on the active profile.
 export function onKeyDown(e) {
     // Only handle when editor screen is visible
     const screen = document.getElementById('plugin-editor');
     if (!screen || !screen.classList.contains('active')) return;
 
+    // Escape — the whole ladder lives in _editorEscape, shared with the Host
+    // `registerShortcut` handler (#39). When the Host registry owns Escape that
+    // handler runs it instead; this fallback covers a Host without the API (and
+    // the unit suites). An unconsumed Escape is left to the Host's
+    // back-to-library, so we deliberately do NOT preventDefault on false.
+    if (e.key === 'Escape') {
+        if (!editorShortcutState.registered && _editorEscape(e)) e.preventDefault();
+        return;
+    }
+
     // Read-only Tab preview is a modal proofreading lens — while it's open
     // NO editor shortcut (fret digits, f, arrows, Delete, transport …) may
     // reach the chart hidden behind it, or the "read-only" preview would
-    // silently mutate the arrangement and pollute undo/redo. Escape closes
-    // it; every other key is swallowed. Mirrors the partsViewMode gate and
-    // must sit before the spacebar/transport handler below.
+    // silently mutate the arrangement and pollute undo/redo. Escape closes it
+    // (now the shared Escape ladder above); every other key is swallowed.
+    // Mirrors the partsViewMode gate and sits before the spacebar handler.
     const _tabPreviewModal = document.getElementById('editor-tab-preview-modal');
     const _tabPreviewOpen = !!(_tabPreviewModal && !_tabPreviewModal.classList.contains('hidden'));
-    const _tabPreviewAction = _tabPreviewKeyPolicyPure(_tabPreviewOpen, e.key);
-    if (_tabPreviewAction === 'close') {
-        e.preventDefault();
-        window.editorHideTabPreview();
-        return;
-    }
-    if (_tabPreviewAction === 'swallow') {
+    if (_tabPreviewKeyPolicyPure(_tabPreviewOpen, e.key) === 'swallow') {
         e.preventDefault();
         return;
     }
@@ -1935,40 +2037,21 @@ export function onKeyDown(e) {
     // The User Guide (Help ▸ User Guide) is the same class of read-only modal
     // lens as the Tab preview: while it's open NO editor shortcut may reach
     // the chart hidden behind it (a stray H/2/Delete would silently mutate the
-    // arrangement and pollute undo/redo). Same policy — Escape closes, every
-    // other key is swallowed — and it too must sit before the spacebar handler.
+    // arrangement and pollute undo/redo). Same policy — Escape closes (the
+    // shared ladder above), every other key is swallowed — and it too must sit
+    // before the spacebar handler.
     const _guideModal = document.getElementById('editor-user-guide-modal');
     const _guideOpen = !!(_guideModal && !_guideModal.classList.contains('hidden'));
-    const _guideAction = _tabPreviewKeyPolicyPure(_guideOpen, e.key);
-    if (_guideAction === 'close') {
-        e.preventDefault();
-        window.editorToggleUserGuide(false);
-        return;
-    }
-    if (_guideAction === 'swallow') {
+    if (_tabPreviewKeyPolicyPure(_guideOpen, e.key) === 'swallow') {
         e.preventDefault();
         return;
     }
 
-    // The right-click context / section menu owns Escape to dismiss itself, and
-    // it is closed HERE — not by main.js's import-time Escape listener — for the
-    // same reason the User Guide close lives here: this runs BEFORE the note /
-    // drum deselect branch below, so Escape-to-dismiss a menu can't ALSO wipe
-    // the selection the menu was opened on (right-click keeps/sets a selection,
-    // then Escape would clear it if both the menu-close and the deselect fired
-    // on one keypress). Only Escape is claimed; every other key still passes
-    // through to the chart behind the menu, exactly as before.
-    const _ctxMenu = document.getElementById('editor-context-menu');
-    if (e.key === 'Escape' && _ctxMenu && !_ctxMenu.classList.contains('hidden')) {
-        e.preventDefault();
-        hideContextMenu();
-        return;
-    }
     // ── Click tools (CLICK-TOOLS-DESIGN.md) ──────────────────────────
     // While the tool palette is open it owns the keyboard: a tool key picks
     // and closes, second-T runs the per-profile call (FeedBack/Cableton →
     // Tempo Map, the old plain-T habit; Logical → Pointer, Logic-exact),
-    // Escape closes, everything else is swallowed.
+    // everything else is swallowed. Escape closes it through the shared ladder.
     if (editorToolPaletteOpen()) {
         e.preventDefault();
         const act = _editorPaletteKeyActionPure(editorShortcutProfile, e.key);
@@ -2049,10 +2132,12 @@ export function onKeyDown(e) {
     // Spacebar: play/pause (also stops recording). Claimed here before the
     // profile dispatch — every profile keeps Space on transport, and the
     // registry row (togglePlay) is what advertises it in the `?` panel and
-    // the command palette.
+    // the command palette. When the Host registry owns the key (#39) its
+    // handler runs the same command, so this listener must not also fire.
     if (e.key === ' ' && !e.target.matches('input, select, textarea')) {
+        if (editorShortcutState.registered) return;
         e.preventDefault();
-        return _editorRunEofCommand('togglePlay');
+        return _editorTogglePlayShortcut(e);
     }
 
     // Block all mutating shortcuts while a take is active so mid-take
@@ -2214,53 +2299,10 @@ export function onKeyDown(e) {
         }
     }
 
-    // A pending tap-tempo run owns Enter/Escape until resolved — checked
-    // before the profile dispatchers so neither can steal the keys.
+    // A pending tap-tempo run owns Enter until resolved — checked before the
+    // profile dispatchers so neither can steal the key. (Its Escape half now
+    // lives in the shared Escape ladder at the top of onKeyDown.)
     if (_tapTempoHandleKey(e)) return;
-
-    // Suggested-fit ghosts own Escape while showing (proposal-only state —
-    // dismissal must never fall through to anything destructive).
-    if (e.key === 'Escape' && S.tempoMapMode && _suggestActive()
-            && !e.target.matches('input, select, textarea')) {
-        e.preventDefault();
-        _suggestDismiss();
-        host.updateBPMDisplay();   // retire the Accept Whole Fit button too
-        host.draw();
-        setStatus('Suggestions dismissed');
-        return;
-    }
-    // Escape clears a barline multi-selection (PR 5a) — layered UNDER the
-    // suggest-dismiss above, so ghosts always own Escape first.
-    if (e.key === 'Escape' && S.tempoMapMode && S.tempoSelMulti && S.tempoSelMulti.size
-            && !e.target.matches('input, select, textarea')) {
-        e.preventDefault();
-        S.tempoSelMulti.clear();
-        host.draw();
-        setStatus('Selection cleared');
-        return;
-    }
-    // Escape drops the note / drum selection — the standard DAW "clear
-    // selection" gesture, absent until now (Escape only ever fired in
-    // tempo-map mode). Layered UNDER every earlier Escape owner: the read-only
-    // Tab-preview / User-Guide lenses (handled at the top of onKeyDown, which
-    // return before reaching here) and the tempo-map suggest-dismiss /
-    // barline-clear branches just above (which return in tempo mode; guarded
-    // out here by !S.tempoMapMode). The transient modals (add-note, context
-    // menu, load, palette) are closed by main.js's import-time keydown
-    // listener, which runs first. Non-destructive: selection is not undo
-    // state, so this touches no history; it no-ops (falls through) when
-    // nothing is selected, keeping Escape free for anything downstream.
-    if (e.key === 'Escape' && !S.tempoMapMode
-            && !e.target.matches('input, select, textarea')
-            && (S.sel.size || (S.drumSel && S.drumSel.size))) {
-        e.preventDefault();
-        S.sel.clear();
-        if (S.drumSel) S.drumSel.clear();
-        _renderInspector();
-        host.draw();
-        setStatus('Selection cleared');
-        return;
-    }
 
     if (_editorDispatchFeedbackShortcut(e)) return;
     if (_editorDispatchEofShortcut(e)) return;
