@@ -1923,7 +1923,20 @@ export function _editorDrumArticulation(kind, e) {
 // overview and a live take ignore Escape exactly as they did before.
 export function _editorEscape(e) {
     if (!e || (e.key !== 'Escape' && e.code !== 'Escape')) return false;
+    if (_editorEscapeOverlays()) return true;
+    if (S.partsViewMode) return false;
+    if (_recState === 'recording') return false;
+    if (_tapTempoHandleKey(e)) return true;
+    if (_editorIsTypingTarget(e)) return false;
+    if (_editorEscapeTempoState()) return true;
+    return _editorEscapeClearSelection();
+}
 
+// Escape rung 1 — the modal/overlay surfaces that sit above the chart and own
+// Escape through their own close: the read-only Tab-preview and User-guide
+// lenses, the right-click context/section menu, and the click tool palette.
+// These ignore the focused element, matching the pre-#39 onKeyDown order.
+function _editorEscapeOverlays() {
     const tabPreview = document.getElementById('editor-tab-preview-modal');
     if (tabPreview && !tabPreview.classList.contains('hidden')) {
         window.editorHideTabPreview();
@@ -1943,11 +1956,13 @@ export function _editorEscape(e) {
         editorCloseToolPalette();
         return true;
     }
-    if (S.partsViewMode) return false;
-    if (_recState === 'recording') return false;
-    if (_tapTempoHandleKey(e)) return true;
-    if (e.target && typeof e.target.matches === 'function'
-            && e.target.matches('input, select, textarea')) return false;
+    return false;
+}
+
+// Escape rung 2 — tempo-map mode: suggested-fit ghosts win over a barline
+// multi-selection (proposal-only state must never fall through to anything
+// destructive). Returns true when it consumed the key.
+function _editorEscapeTempoState() {
     if (S.tempoMapMode && _suggestActive()) {
         _suggestDismiss();
         host.updateBPMDisplay();   // retire the Accept Whole Fit button too
@@ -1961,6 +1976,13 @@ export function _editorEscape(e) {
         setStatus('Selection cleared');
         return true;
     }
+    return false;
+}
+
+// Escape rung 3 — the standard DAW "clear selection" gesture for notes/drums,
+// layered under every earlier owner. Non-destructive (selection is not undo
+// state), so this touches no history and no-ops when nothing is selected.
+function _editorEscapeClearSelection() {
     if (!S.tempoMapMode && (S.sel.size || (S.drumSel && S.drumSel.size))) {
         S.sel.clear();
         if (S.drumSel) S.drumSel.clear();
