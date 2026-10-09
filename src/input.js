@@ -83,6 +83,9 @@ function _editorShortcutPanelHintPure(id) {
     case 'setFretDigit': return 'Press 0-9 to set the selected note fret';
     case 'nudgeTrackOffsetLeft': return 'Requires the Tracks overview with a track selected';
     case 'nudgeTrackOffsetRight': return 'Requires the Tracks overview with a track selected';
+    case 'nudgeRegionLeft': return 'Requires the Tracks overview with a region selected';
+    case 'nudgeRegionRight': return 'Requires the Tracks overview with a region selected';
+    case 'moveRegionByAmount': return 'Requires the Tracks overview with a region selected';
     case 'nudgeLoopStartLeft': return 'Requires an active loop selection';
     case 'nudgeLoopStartRight': return 'Requires an active loop selection';
     case 'nudgeLoopEndLeft': return 'Requires an active loop selection';
@@ -1456,6 +1459,9 @@ export function _editorRunEofCommand(cmd) {
     case 'nudgeTimeRight': return _editorNudgeSelectionTime(+1);
     case 'nudgeTrackOffsetLeft': return _editorNudgeTrackOffset(-1);
     case 'nudgeTrackOffsetRight': return _editorNudgeTrackOffset(+1);
+    case 'nudgeRegionLeft': return host.partsViewRegionNudge(-1, false);
+    case 'nudgeRegionRight': return host.partsViewRegionNudge(+1, false);
+    case 'moveRegionByAmount': return host.partsViewRegionPromptMove();
     case 'nudgeLoopStartLeft': return _editorNudgeLoopEdge('start', -1);
     case 'nudgeLoopStartRight': return _editorNudgeLoopEdge('start', +1);
     case 'nudgeLoopEndLeft': return _editorNudgeLoopEdge('end', -1);
@@ -1959,6 +1965,28 @@ export function onKeyDown(e) {
         && !e.target.matches('input, select, textarea')) {
         const dir = e.key === 'ArrowRight' ? 1 : -1;
         if (_editorNudgeTrackOffset(dir, e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            return;
+        }
+    }
+
+    // Region-move nudge (issue #42): the Tracks overview's primary object is the
+    // REGION block, and the arrow keys are otherwise DEAD there — the read-only
+    // guard below swallows every key but Shift+A/Delete. So plain ←/→ nudges the
+    // selected region by one beat and Shift makes it one bar, which also matches
+    // the note view's plain-arrow "nudge the selected thing" meaning. This sits
+    // before the guard (like the track-offset chord above); when there is no
+    // selected region — or a leftward step would cross beat 0 — the verb returns
+    // false and the key falls through, so nothing that used to work changes.
+    // Each press is one undoable MoveRegionCmd; holding coalesces into a single
+    // undo step (MoveRegionCmd.merge). The chord owns the keyboard; the `?`
+    // panel and command palette reach the same action via the registry row.
+    if (S.partsViewMode && S.selectedRegionId
+        && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')
+        && !e.altKey && !e.ctrlKey && !e.metaKey
+        && !e.target.matches('input, select, textarea')) {
+        const dir = e.key === 'ArrowRight' ? 1 : -1;
+        if (host.partsViewRegionNudge(dir, e.shiftKey)) {
             e.preventDefault();
             return;
         }

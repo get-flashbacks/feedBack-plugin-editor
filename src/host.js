@@ -244,6 +244,17 @@ export const host = {
      * input.js's Delete ladder asks here. False = key not consumed.
      */
     partsViewRegionDelete: () => false,
+    /**
+     * Keyboard nudge of the selected region block (Tracks view): one beat, or
+     * one bar with `coarse`. Owned by src/parts-view.js; input.js's arrow-key
+     * chord calls it. False = the key was not consumed (no region / at beat 0).
+     */
+    partsViewRegionNudge: () => false,
+    /**
+     * Numeric prompt for an exact region move, in beats. Same owner; the
+     * command palette and the `window.editorPromptRegionMove` alias call it.
+     */
+    partsViewRegionPromptMove: async () => false,
     stripUiChanged: () => {},
     /** The persisted band-mode pref, read by the panel's header toggle. */
     playAllTracksEnabled: () => false,

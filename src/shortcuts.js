@@ -107,6 +107,9 @@ const EDITOR_SHORTCUT_COMMANDS = Object.freeze([
     // context-suffix idiom (ruler.js strips it back when it cites a key).
     { id: 'nudgeTrackOffsetLeft', label: 'Nudge selected track offset earlier', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Shift+Left (Parts view)', eof: '' } },
     { id: 'nudgeTrackOffsetRight', label: 'Nudge selected track offset later', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Shift+Right (Parts view)', eof: '' } },
+    { id: 'nudgeRegionLeft', label: 'Nudge selected region earlier (one beat; Shift = one bar)', group: 'Timeline', status: 'ready', keys: { feedback: 'Left (Parts view)', eof: '' } },
+    { id: 'nudgeRegionRight', label: 'Nudge selected region later (one beat; Shift = one bar)', group: 'Timeline', status: 'ready', keys: { feedback: 'Right (Parts view)', eof: '' } },
+    { id: 'moveRegionByAmount', label: 'Move selected region by an exact beat amount', group: 'Timeline', status: 'ready', keys: { feedback: '', eof: '' } },
     { id: 'nudgeLoopStartLeft', label: 'Nudge loop start earlier', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Left (loop selected)', eof: '' } },
     { id: 'nudgeLoopStartRight', label: 'Nudge loop start later', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Right (loop selected)', eof: '' } },
     { id: 'nudgeLoopEndLeft', label: 'Nudge loop end earlier', group: 'Timeline', status: 'ready', keys: { feedback: 'Alt+Shift+Left (loop selected)', eof: '' } },

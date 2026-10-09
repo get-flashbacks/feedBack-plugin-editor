@@ -72,6 +72,22 @@ function _restoreRegions(track, snap) {
     if (snap.hadKey) track.regions = snap.value; else delete track.regions;
 }
 
+// The earliest onset beat the region's window owns (null when the content is
+// empty/unresolvable). The keyboard nudge reads this to clamp a leftward step to
+// the same floor the drag's bar-snap enforces: content never crosses beat 0.
+// Shares `_contained`'s membership test (`_regionContainsBeatPure`) so the clamp
+// agrees with what the command will actually move.
+export function regionMinContainedBeat(kind, arrIdx, region) {
+    const list = _contentList(kind, arrIdx);
+    if (!list) return null;
+    let min = Infinity;
+    for (const item of list) {
+        const beat = beatOf(S.beats, Number(_timeOfItem(kind, item)) || 0);
+        if (_regionContainsBeatPure(region, beat) && beat < min) min = beat;
+    }
+    return Number.isFinite(min) ? min : null;
+}
+
 export class MoveRegionCmd {
     // `kind`: 'notation' shifts S.arrangements[arrIdx].notes; 'drums' shifts the
     // hits of the drum part `arrIdx` names (its own `.drumTab`; arrIdx < 0 = the
@@ -84,6 +100,10 @@ export class MoveRegionCmd {
         this.trackId = trackId;
         this.region = region || {};
         this.dBeat = Number(dBeat) || 0;
+        // Opt-in coalescing (default off — drags/drops stay one-entry-per-move).
+        // Only the keyboard nudge verb sets this; EditHistory then folds a
+        // consecutive run of nudges into one entry via merge(). See TrackOffsetCmd.
+        this.coalesce = false;
         // A region move changes only WHEN content plays, never its pitch, so it
         // passes the read-only-roll edit lock like the sustain/position edits.
         this.pitchPreserving = true;
@@ -93,6 +113,7 @@ export class MoveRegionCmd {
         this._snap = null;         // [{ item, time, sustain }] verbatim pre-move values
         this._before = null;       // ref-order snapshot of the content array
         this._regionBefore = { taken: false, hadKey: false, value: undefined };
+        this._regionOriginStart = null;  // bounded window's pre-run startBeat
     }
 
     // A bounded region carries its own placement (a window past beat 0, a
@@ -127,28 +148,59 @@ export class MoveRegionCmd {
         if (!list) return;
         this._before = list.slice();                     // exact order for rollback
         const targets = this._contained(list);
+        this._snap = this.kind === 'drums'
+            ? targets.map(h => ({ item: h, time: h.t, sustain: 0 }))
+            : targets.map(n => ({ item: n, time: n.time, sustain: n.sustain || 0 }));
+        this._prepareRegion();
+        this._apply();
+    }
+
+    // Re-apply the move from the ORIGINAL snapshots at the cumulative dBeat.
+    // Called by exec() and by merge(), so a merged run never re-snapshots — the
+    // rollback target stays the run's true origin, not the previous keystroke's
+    // result.
+    _apply() {
+        const list = this._list();
+        if (!list || !this._snap) return;
         if (this.kind === 'drums') {
-            this._snap = targets.map(h => ({ item: h, time: h.t, sustain: 0 }));
+            for (const s of this._snap) s.item.t = s.time;
             const { times } = _regionRemapPure(
-                targets.map(h => h.t), null, this.dBeat, S.beats, beatOf, timeOf);
-            targets.forEach((h, i) => { h.t = times[i]; });
+                this._snap.map(s => s.time), null, this.dBeat, S.beats, beatOf, timeOf);
+            this._snap.forEach((s, i) => { s.item.t = times[i]; });
             list.sort((a, b) => (a.t || 0) - (b.t || 0));
             S.drumTabDirty = true;
         } else {
-            this._snap = targets.map(n => ({ item: n, time: n.time, sustain: n.sustain || 0 }));
+            for (const s of this._snap) { s.item.time = s.time; s.item.sustain = s.sustain; }
             const { times, sustains } = _regionRemapPure(
-                targets.map(n => n.time), targets.map(n => n.sustain || 0),
+                this._snap.map(s => s.time), this._snap.map(s => s.sustain),
                 this.dBeat, S.beats, beatOf, timeOf);
-            targets.forEach((n, i) => { n.time = times[i]; n.sustain = sustains[i]; });
+            this._snap.forEach((s, i) => { s.item.time = times[i]; s.item.sustain = sustains[i]; });
             list.sort((a, b) => (a.time || 0) - (b.time || 0));
         }
-        this._shiftRegion();
+        this._applyRegion();
+    }
+
+    // Fold a consecutive nudge of the SAME region into this command. EditHistory
+    // only calls this inside an unbroken run (redo stack empty, both commands
+    // opt into coalescing), so holding an arrow key collapses to one undo entry
+    // instead of one per keystroke. `dBeat` accumulates and _apply() recomputes
+    // content + window from the ORIGINAL snapshots, so rollback still restores
+    // the run's origin.
+    merge(next) {
+        if (!next || next.kind !== this.kind || next.arrIdx !== this.arrIdx) return false;
+        if (next.trackId !== this.trackId) return false;
+        if (!this.region || !next.region || this.region.id !== next.region.id) return false;
+        const d = Number(next.dBeat) || 0;
+        if (!d || !this._snap) return false;
+        this.dBeat += d;
+        this._apply();
+        return true;
     }
 
     rollback() {
         if (this.dBeat === 0) return;
         const list = this._list();
-        if (!list) return;
+        if (!list || !this._snap) return;
         // Restore each moved item's verbatim pre-move values (the beat round trip
         // is not bit-reversible, so never invert), then restore the exact order.
         if (this.kind === 'drums') {
@@ -167,22 +219,31 @@ export class MoveRegionCmd {
         return tracks ? tracks.find(t => t && t.id === this.trackId) : null;
     }
 
-    // Ride the bounded window's startBeat by dBeat, so it keeps owning the same
-    // notes after the move. Snapshot the track's raw `regions` (absent or an
-    // array) so rollback restores it exactly — including deleting a key that was
-    // never there. A default region never reaches here (see _bounded).
-    _shiftRegion() {
+    // Snapshot the bounded window ONCE, in exec — its raw `regions` for exact
+    // rollback (incl. deleting a key that wasn't there) and its resolved
+    // startBeat as the move origin, so a merged run always rides from the same
+    // place. A default region never reaches here (see _bounded): it carries the
+    // move in content alone.
+    _prepareRegion() {
         if (!this._bounded()) return;
         const track = this._track();
         if (!track) return;
-        this._regionBefore = {
-            taken: true,
-            hadKey: Object.prototype.hasOwnProperty.call(track, 'regions'),
-            value: track.regions,
-        };
+        this._regionBefore = _snapRegions(track);
+        const resolved = _trackRegionsResolvePure(track.regions).find(r => r.id === this.region.id);
+        this._regionOriginStart = resolved ? (Number(resolved.startBeat) || 0) : null;
+    }
+
+    // Ride the bounded window's startBeat by the cumulative dBeat, always from
+    // the ORIGINAL origin. Recomputing (rather than adding to the current value)
+    // makes _apply idempotent, so a merge never double-counts.
+    _applyRegion() {
+        if (!this._regionBefore.taken) return;
+        const track = this._track();
+        if (!track) return;
+        const origin = this._regionOriginStart;
         const moved = _trackRegionsResolvePure(track.regions).map(r => (
             r.id === this.region.id
-                ? { ...r, startBeat: Math.max(0, (Number(r.startBeat) || 0) + this.dBeat) }
+                ? { ...r, startBeat: Math.max(0, (origin == null ? (Number(r.startBeat) || 0) : origin) + this.dBeat) }
                 : r
         ));
         track.regions = _trackRegionsNormalizePure(moved);

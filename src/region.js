@@ -365,3 +365,23 @@ export function _placeAtStartBeatPure(placeAt, beats, cursorTime, beatOf) {
         : _regionSnapStartPure(downbeats, cursorTime, false);
     return Math.max(0, beatOf(beats, t));
 }
+
+// Keyboard nudge step for the region move, in BEATS — the one place the fine /
+// coarse sizes live. Fine is one beat: `MoveRegionCmd` is beat-preserving, so a
+// whole-beat step lands content on the grid. Coarse is one BAR, read from the
+// grid's own downbeats (`measure > 0` marks a bar start, and the array index IS
+// the integer beat coordinate), so it follows a 3/4 or 7/8 meter instead of
+// assuming four; a missing/degenerate grid falls back to four. Converter-free,
+// like `_regionSnapStartPure` and `_placeAtStartBeatPure`.
+export function _regionNudgeStepBeatsPure(beats, coarse) {
+    if (!coarse) return 1;
+    const downs = [];
+    if (Array.isArray(beats)) {
+        for (let i = 0; i < beats.length; i++) if (beats[i] && beats[i].measure > 0) downs.push(i);
+    }
+    for (let i = 1; i < downs.length; i++) {
+        const span = downs[i] - downs[i - 1];
+        if (Number.isFinite(span) && span > 0) return span;
+    }
+    return 4;
+}
