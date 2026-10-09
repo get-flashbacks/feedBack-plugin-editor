@@ -1795,17 +1795,14 @@ export function _editorSelectAllPolicyPure(e) {
 // the key to the browser / downstream owners. The Tracks-overview region rung
 // is the one "claim" case: its verdict is `host.partsViewRegionDelete()`'s, so
 // no selected region keeps the key ignored like the rest of the overview.
-export function _editorDeleteSelection(e) {
-    if (e.key !== 'Delete' && e.key !== 'Backspace') return false;
-    if (e.target && typeof e.target.matches === 'function'
-            && e.target.matches('input, select, textarea')) return false;
-    // Tracks overview — this surface's only editable object is the region block.
-    if (S.partsViewMode) return host.partsViewRegionDelete();
-    // Tempo-map mode: delete the selected barline(s) — bulk when a
-    // multi-selection exists (PR 5a), else the single focus. With nothing
-    // selected, mirror the profile dispatch's hint (and consume the key) so a
-    // host-dispatched Delete isn't silently inert where the fallback path
-    // advertised the fix.
+function _editorDeletePartsView() {
+    if (S.partsViewMode) {
+        return host.partsViewRegionDelete();
+    }
+    return false;
+}
+
+function _editorDeleteTempoMap() {
     if (S.tempoMapMode) {
         if (S.tempoSel >= 0 || (S.tempoSelMulti && S.tempoSelMulti.size)) {
             _tempoDeleteSelection();
@@ -1814,7 +1811,10 @@ export function _editorDeleteSelection(e) {
         }
         return true;
     }
-    // Anchor-lane: delete the selected anchor.
+    return false;
+}
+
+function _editorDeleteAnchor() {
     if (S.anchorSel && !S.drumEditMode && !S.tempoMapMode) {
         const arr = _currentAnchorArr();
         if (arr && Array.isArray(arr.anchors_user)
@@ -1825,15 +1825,15 @@ export function _editorDeleteSelection(e) {
             return true;
         }
     }
-    // Handshape-lane: delete the selected handshape.
+    return false;
+}
+
+function _editorDeleteHandshape() {
     if (S.handshapeSel && !S.drumEditMode && !S.tempoMapMode) {
         const arr = _currentAnchorArr();
         if (arr && Array.isArray(arr.handshapes)
                 && arr.handshapes.includes(S.handshapeSel)) {
             S.history.exec(new RemoveHandshapeCmd(S.currentArr, S.handshapeSel));
-            // Drop any in-flight drag on the just-deleted handshape so a
-            // trailing mouseup can't enqueue a move/resize for a detached
-            // object (and falsely bump the dirty count).
             if (S.drag && S.drag.type === 'handshape' && S.drag.hs === S.handshapeSel) {
                 S.drag = null;
             }
@@ -1842,8 +1842,10 @@ export function _editorDeleteSelection(e) {
             return true;
         }
     }
-    // Tone-lane: delete the selected tone-change marker. Mirrors the note-path
-    // gates; an old tone selection must not hijack the key in drum/tempo mode.
+    return false;
+}
+
+function _editorDeleteTone() {
     if (S.toneSel && !S.drumEditMode && !S.tempoMapMode) {
         const arr = _currentToneArr();
         if (arr && arr.tones && Array.isArray(arr.tones.changes)
@@ -1854,21 +1856,39 @@ export function _editorDeleteSelection(e) {
             return true;
         }
     }
-    // Drum-edit mode: delete selected drum hits as one undoable step.
+    return false;
+}
+
+function _editorDeleteDrum() {
     if (S.drumEditMode && S.drumSel.size && S.drumTab) {
         _drumEditorDeleteSelection();
         host.draw();
         return true;
     }
-    // Guard: in drum-edit mode S.sel may still hold a prior guitar/keys
-    // selection from before mode entry; deleting those notes while the user
-    // thinks they're editing drums would be surprising.
+    return false;
+}
+
+function _editorDeleteNotes() {
     if (!S.drumEditMode && !S.tempoMapMode && S.sel.size) {
         S.history.exec(new DeleteNotesCmd([...S.sel]));
         host.draw();
         host.updateStatus();
         return true;
     }
+    return false;
+}
+
+export function _editorDeleteSelection(e) {
+    if (e.key !== 'Delete' && e.key !== 'Backspace') return false;
+    if (e.target && typeof e.target.matches === 'function'
+            && e.target.matches('input, select, textarea')) return false;
+    if (_editorDeletePartsView()) return true;
+    if (_editorDeleteTempoMap()) return true;
+    if (_editorDeleteAnchor()) return true;
+    if (_editorDeleteHandshape()) return true;
+    if (_editorDeleteTone()) return true;
+    if (_editorDeleteDrum()) return true;
+    if (_editorDeleteNotes()) return true;
     return false;
 }
 
