@@ -163,6 +163,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tests/track_nudge_keydown.test.mjs`. (Surfacing the new keys in
   the `?` help panel belongs to the keybind audit in #10/#38 and is intentionally left here.)
 
+- **Region move: keyboard nudge + exact beat prompt + coalescing undo (issue #42,
+  region half).** The Tracks overview could drag a region block but not nudge it
+  precisely. Added `←`/`→` to nudge the selected region by one beat (fine) and
+  `Shift+←/→` by one bar (coarse — read from the grid's own downbeats, so a 3/4
+  waltz steps 3), plus a numeric `Move region by … beats` prompt
+  (`window.editorPromptRegionMove`, also a command-palette entry) for an exact
+  signed amount. Both funnel through the existing `MoveRegionCmd`, so the window
+  and the notes it owns move together as one undoable step. A leftward step is
+  clamped to beat 0 — the same floor the drag's bar-snap enforces — and refused
+  when there is no room, so the key falls through rather than silently no-op'ing.
+  Undo coalescing: `MoveRegionCmd` now opts into the same `merge` hook as
+  `TrackOffsetCmd`, so holding an arrow key collapses to one undo entry; the
+  merge recomputes content and window from the run's ORIGINAL snapshot (never
+  re-snapshots), so one `Ctrl+Z` restores the pre-run state. Drags/drops leave
+  coalescing off and keep one entry per gesture. New registry rows surface the
+  chords in the `?` panel and palette. Covered by `tests/region_nudge.test.mjs`
+  and the keydown-path cases in `tests/region_nudge_keydown.test.mjs`.
+
 
 - **`editor_cache/` is now included in Settings backups.** Uploaded audio,
   art, previews, and stem-session files for an in-progress (not yet

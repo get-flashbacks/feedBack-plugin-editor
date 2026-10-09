@@ -10,8 +10,8 @@ import { hideContextMenu } from './context-menu.js';
 import { DRUM_PIECE_META, _refreshDrumEditButton } from './drum.js';
 import { beatOf, timeOf } from './beats.js';
 import { LABEL_W, TIMELINE_TOP, timeToX, xToTime } from './geometry.js';
-import { _regionBannerH, _regionBlockRectPure, _regionHitPure, _regionSnapStartPure, _regionTimeSpanPure, _trackPlacementPure, _trackRegionsResolvePure } from './region.js';
-import { DeleteRegionCmd, MoveRegionCmd } from './region-commands.js';
+import { _regionBannerH, _regionBlockRectPure, _regionHitPure, _regionNudgeStepBeatsPure, _regionSnapStartPure, _regionTimeSpanPure, _trackPlacementPure, _trackRegionsResolvePure } from './region.js';
+import { DeleteRegionCmd, MoveRegionCmd, regionMinContainedBeat } from './region-commands.js';
 import { isDrumArrangement } from './drum-arrangement.js';
 import { arrKind } from './instrument.js';
 import { _stringCountFor } from './lanes.js';
@@ -24,7 +24,7 @@ import {
     _liveSources, _trackSessionFittedHeightsPure, _trackSessionLaneLayoutPure, _trackSessionRowsPure,
     _trackSessionTargetsPure, refreshTrackSessionSelection,
 } from './track-session.js';
-import { setStatus } from './ui.js';
+import { _editorPromptText, setStatus } from './ui.js';
 import { host } from './host.js';
 
 /* @pure:parts-view:start */
@@ -597,6 +597,82 @@ export function _partsViewRegionDelete() {
     host.draw();
     host.updateStatus();
     setStatus(`Deleted region “${region.name || region.id}” and its notes — Undo restores it`);
+    return true;
+}
+
+// Keyboard nudge of the selected region block: one beat (fine) or one bar
+// (coarse, from the grid's own downbeats). One undoable MoveRegionCmd per press;
+// EditHistory coalesces a held key into a single entry (MoveRegionCmd.merge). A
+// leftward step is clamped to beat 0 — the same floor the drag's bar-snap
+// enforces — and refused when there is no room, so the key falls through instead
+// of silently no-op'ing. Transcription rows only, matching drag/delete. Returns
+// true when it consumed the nudge.
+export function _partsViewRegionNudge(dir, coarse = false) {
+    if (!S.partsViewMode || !S.selectedTrackId || !S.selectedRegionId || !S.history) return false;
+    const row = _unifiedRows().find(r => r.id === S.selectedTrackId);
+    if (!row || row.type !== 'transcription') return false;
+    const region = _trackRegionsResolvePure(row.regions).find(r => r.id === S.selectedRegionId);
+    if (!region) return false;
+    const arrIdx = _arrIndexForTarget(row.targetId);
+    const kind = _isDrumRow(arrIdx, row.targetId) ? 'drums' : 'notation';
+    let step = _regionNudgeStepBeatsPure(S.beats, coarse) * (dir < 0 ? -1 : 1);
+    if (dir < 0) {
+        const minBeat = regionMinContainedBeat(kind, arrIdx, region);
+        if (minBeat === null) return false;              // nothing contained → no move
+        step = Math.max(step, -minBeat);                 // never cross beat 0
+        if (Math.abs(step) < 1e-9) return false;         // already at the floor
+    }
+    const cmd = new MoveRegionCmd({ kind, arrIdx, trackId: row.id, region, dBeat: step });
+    // Opt into coalescing: holding the arrow key folds the repeats into one undo
+    // entry (MoveRegionCmd.merge). A typed value / drag leaves it off.
+    cmd.coalesce = true;
+    S.history.exec(cmd);
+    host.draw();
+    host.updateStatus();
+    const beats = Math.abs(step);
+    setStatus(`Nudged “${region.name || region.id}” ${step > 0 ? 'later' : 'earlier'} by ${beats} beat${beats === 1 ? '' : 's'}`);
+    return true;
+}
+
+// Numeric region move: an exact signed number of beats (the drag is bar-
+// snapped; this is the precise path). Same MoveRegionCmd, but coalescing stays
+// off, so a typed value is its own undo step. Reachable from the command palette
+// and the `window.editorPromptRegionMove` alias.
+export async function _partsViewRegionPromptMove() {
+    if (!S.partsViewMode || !S.selectedTrackId || !S.selectedRegionId || !S.history) {
+        setStatus('Select a region in the Tracks overview first.');
+        return false;
+    }
+    const row = _unifiedRows().find(r => r.id === S.selectedTrackId);
+    const region = (row && row.type === 'transcription')
+        ? _trackRegionsResolvePure(row.regions).find(r => r.id === S.selectedRegionId) : null;
+    if (!region) { setStatus('Select a region in the Tracks overview first.'); return false; }
+    const raw = await _editorPromptText({
+        title: 'Move region',
+        label: `“${region.name || region.id}” — move by a number of beats (+ = later, − = earlier).`,
+        value: '',
+        placeholder: 'e.g. 4 or -2',
+    });
+    if (raw === null) return false;
+    const beats = typeof raw === 'number' ? raw : parseFloat(raw);
+    if (!Number.isFinite(beats) || Math.abs(beats) < 1e-9) {
+        setStatus('Enter a beat amount (e.g. 4 or -2) — nothing was changed.');
+        return false;
+    }
+    const arrIdx = _arrIndexForTarget(row.targetId);
+    const kind = _isDrumRow(arrIdx, row.targetId) ? 'drums' : 'notation';
+    let step = beats;
+    if (step < 0) {
+        const minBeat = regionMinContainedBeat(kind, arrIdx, region);
+        if (minBeat === null) { setStatus('Nothing to move in this region.'); return false; }
+        step = Math.max(step, -minBeat);
+        if (Math.abs(step) < 1e-9) { setStatus('This region is already at the start — nothing moved.'); return false; }
+    }
+    S.history.exec(new MoveRegionCmd({ kind, arrIdx, trackId: row.id, region, dBeat: step }));
+    host.draw();
+    host.updateStatus();
+    const beats2 = Math.abs(step);
+    setStatus(`Moved “${region.name || region.id}” ${step > 0 ? 'later' : 'earlier'} by ${beats2} beat${beats2 === 1 ? '' : 's'}`);
     return true;
 }
 

@@ -112,7 +112,8 @@ import {
 } from './new-track.js';
 import {
     _editorTogglePartsView, _partsViewDraw, _partsViewOnDblClick, _partsViewOnMouseDown,
-    _partsViewRegionDelete, _partsViewRegionDrag, _partsViewRegionDrop, _refreshPartsViewButton
+    _partsViewRegionDelete, _partsViewRegionDrag, _partsViewRegionDrop, _partsViewRegionNudge,
+    _partsViewRegionPromptMove, _refreshPartsViewButton
 } from './parts-view.js';
 import { drawWaveform } from './waveform.js';
 import {
@@ -559,6 +560,8 @@ setHostHooks({
     partsViewRegionDrag: (...a) => _partsViewRegionDrag(...a),
     partsViewRegionDrop: (...a) => _partsViewRegionDrop(...a),
     partsViewRegionDelete: () => _partsViewRegionDelete(),
+    partsViewRegionNudge: (...a) => _partsViewRegionNudge(...a),
+    partsViewRegionPromptMove: (...a) => _partsViewRegionPromptMove(...a),
     resizeCanvas: (...a) => resizeCanvas(...a),
     editorCycleViewMode: (...a) => _editorCycleViewMode(...a),
     editorMovePart: (...a) => _editorMovePart(...a),
@@ -699,6 +702,10 @@ window.editorNudgeAudioShift = editorNudgeAudioShift;
 window.editorSetTrackOffset = editorSetTrackOffset;
 window.editorNudgeTrackOffset = editorNudgeTrackOffset;
 window.editorPromptTrackOffset = editorPromptTrackOffset;
+// Region move (issue #42): the Tracks-overview counterpart — arrow-key nudge and
+// an exact-beat prompt, both riding the one MoveRegionCmd (input.js owns the
+// chord; the prompt is also a palette command).
+window.editorPromptRegionMove = _partsViewRegionPromptMove;
 window.editorSetAuditionRate = editorSetAuditionRate;
 window.editorToggleAuditionTrainer = editorToggleAuditionTrainer;
 // Slide the recording in time to line it up with the chart (audio moves, chart
