@@ -324,6 +324,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The mastery slider is verified end to end on editor-saved packs, and the
+  historical "slider is a no-op" framing is now scoped to the 1.4.3 behavior
+  it described (#36).** The 1.4.3 note quoted at the bottom of this file —
+  "This makes the mastery slider a no-op for editor-saved sloppaks (every
+  level shows the same notes)" — was exact for the single-difficulty
+  authoring model *then*; it now carries a pointer to the authoring work above
+  it. What shipped: the save-path → host-consumer leg of the chain (the
+  editor's authored `phrases[].tiers[]`, `_repopulate_phrase_levels` writing
+  `phrases[].levels[]`, and core's `static/highway.js`
+  `phraseLevelIndexForMastery` / `_rebuildMasteryFilter`) is now pinned by a
+  repeatable suite, `tests/test_mastery_filter_e2e.py`, that mirrors core's
+  filter semantics — a fully authored ladder (difficulty 0..n-1 with
+  `max_difficulty` n-1, the scope core's own comment states) maps as
+  `floor(mastery * n)` exactly as the upstream highway always did, sparse
+  ladders keep each tier covering the slider band it was authored for, and a
+  ladder whose top tier sits below `max_difficulty` leaves that positional
+  index exactly where core intends — and drives the mirror over the save
+  path's *real* output: a pack with an authored tier renders a strictly
+  smaller note set as the slider drops (each derived rung distinct),
+  chords/anchors pair with their level, a pack without authored tiers keeps
+  today's all-levels-identical behavior, and a freshly added (un-simplified)
+  phrase saves an empty ladder and leaves the rest of the pack unchanged.
+  Manual host check: `Alt+P` a phrase, save the pack, load it in the host and
+  drag the master-difficulty slider.
+
 - **Every static dialog now closes on Escape, traps Tab focus, and returns
   focus to its opener — one modal keyboard policy (#31, P1.6).** The nine
   import/authoring modals already routed through `_installModalKeyboard`, but
@@ -3870,7 +3895,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flat `notes` array when `phrases` is absent. This makes the mastery
   slider a no-op for editor-saved sloppaks (every level shows the
   same notes), which matches the editor's single-difficulty authoring
-  model. Phrase windows are derived from each phrase's `start_time`
+  model. *Update (mastery-slider verification, #36):* with per-phrase
+  tier authoring and the save path's tier persistence in place, an
+  editor-saved pack with authored tiers now drives the slider — the
+  "every level shows the same notes" framing applied at the time, not
+  now. See the [Unreleased] sections above for the current behavior.
+  Phrase windows are derived from each phrase's `start_time`
   and the next phrase's `start_time` (with the first/last extending
   to ±∞), not from the stored `end_time` — the tempo-edit path
   updates note times and phrase `start_time` but does not touch
