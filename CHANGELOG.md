@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Per-section sync design decisions (#23): one fitted song-wide beat grid,
+  a continuous constrained time-map, exact skipped-section preservation, and
+  an offline save/build/XML contract using the existing feedpak schema.
+  Design only; alignment, baking and review UI remain in #24–#26.
+
 - **The undo stack is no longer invisible: a last-action label and a Revert
   button sit beside Undo/Redo (#43).** Every committed edit now names itself —
   the label is derived from the command's own class (or an explicit `label` on
