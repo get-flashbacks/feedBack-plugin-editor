@@ -159,3 +159,11 @@ House rules: never stub the subject under test; round-trip every command
 change needs a test that fails without it.
 
 Every user-visible change adds a `CHANGELOG.md` entry under `[Unreleased]`.
+
+## Per-section sync design
+
+The decisions for [issue #23](https://github.com/get-flashbacks/feedBack-plugin-editor/issues/23)
+are recorded in [Per-section sync: time-map and persistence decisions](docs/PER-SECTION-SYNC-DESIGN.md).
+They specify the shared grid, continuous boundaries, skipped-section guarantees
+and existing-format round-trip contract for #24–#26. Per-section sync remains
+planned; this document does not add a shipped feature.
