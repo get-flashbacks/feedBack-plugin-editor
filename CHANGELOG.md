@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an offline save/build/XML contract using the existing feedpak schema.
   Design only; alignment, baking and review UI remain in #24–#26.
 
+- **Per-section alignment engine (#24): pure per-section sync analysis.** A
+  read-only engine (`src/section-sync.js`) runs the shipped onset-vote tempo
+  estimator per section and adds a DTW anchor pass, returning one independent
+  source→audio proposal per section (factor, affine slope/intercept, anchored
+  correspondences, confidence and reason). Sections chain into one continuous
+  piecewise-linear map via their shared boundaries, a mismatched or
+  low-confidence section is neither carried nor merged, and a single-section
+  song reduces to the existing uniform model. Analysis only — nothing bakes
+  timestamps (#25) or surfaces in the UI (#26) yet.
+
 - **The undo stack is no longer invisible: a last-action label and a Revert
   button sit beside Undo/Redo (#43).** Every committed edit now names itself —
   the label is derived from the command's own class (or an explicit `label` on
