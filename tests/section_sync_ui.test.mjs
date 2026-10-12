@@ -21,7 +21,8 @@ import { EditHistory } from '../src/history.js';
 import { seedState } from './_history_env.mjs';
 import { applyPerSectionSync } from '../src/tempo.js';
 import {
-    SECTION_SYNC_CONFIDENCE_FLOOR, _proposalAcceptedPure, _sectionSyncPlanPure,
+    SECTION_SYNC_CONFIDENCE_FLOOR, _proposalAcceptedPure, _sectionSyncHighConfidenceDisabledPure,
+    _sectionSyncPlanPure,
 } from '../src/section-sync.js';
 
 function prop(index, start, end, opts = {}) {
@@ -127,6 +128,23 @@ test('a run pinned to identity at both ends surfaces a conflict the UI can block
     const skipped = _sectionSyncPlanPure(a, new Map([[1, false]]));
     assert.deepStrictEqual(skipped.conflicts, []);
     assert.strictEqual(skipped.rows[1].wanted, false);
+});
+
+test('the "Apply all high-confidence" gate reads the DEFAULT plan, not current decisions', () => {
+    const a = analysis([
+        prop(0, 0, 10, { confidence: 0.3 }),
+        prop(1, 10, 20, { confidence: 0.9, slope: 2 }),
+        prop(2, 20, 30, { confidence: 0.3 }),
+    ]);
+    // The default plan pins the trusted middle run at both ends -> conflict, so
+    // the button that commits that plan is blocked.
+    assert.strictEqual(_sectionSyncHighConfidenceDisabledPure(a), true);
+    // Skipping the middle section clears the CURRENT plan's conflict, but the
+    // button rebuilds the default decision set, so it must stay blocked — the
+    // regression the gate is derived from the default plan to avoid.
+    const current = _sectionSyncPlanPure(a, new Map([[1, false]]));
+    assert.deepStrictEqual(current.conflicts, []);
+    assert.strictEqual(_sectionSyncHighConfidenceDisabledPure(a), true);
 });
 
 test('_proposalAcceptedPure honours selected overrides but never affine validity', () => {

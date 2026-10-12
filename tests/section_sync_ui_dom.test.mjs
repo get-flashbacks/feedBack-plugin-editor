@@ -152,6 +152,7 @@ t('opening shows the modal, disables Apply on an all-skipped plan, and focuses i
     assert.match(summaryEl.textContent, /0\/1 selected/, 'summary counts 0 applied');
     assert.match(summaryEl.textContent, /1 low-confidence skipped/, 'low section reported skipped');
     assert.strictEqual(applyBtn.disabled, true, 'Apply disabled with nothing selected');
+    assert.strictEqual(applyHigh.disabled, true, '"Apply all high-confidence" disabled with no trusted section');
     assert.ok(activeEl && activeEl !== document.body, 'focus moved into the modal despite disabled Apply');
     assert.strictEqual(panel.contains(activeEl) || activeEl === modal, true, 'focus is inside the modal');
 });
@@ -161,6 +162,9 @@ t('toggling the low-confidence section selects it, enables Apply and keeps focus
     assert.match(summaryEl.textContent, /1\/1 selected/, 'summary counts the forced section');
     assert.doesNotMatch(summaryEl.textContent, /skipped/, 'no skipped count once selected');
     assert.strictEqual(applyBtn.disabled, false, 'Apply enabled after selecting');
+    // The high-confidence action still has no trusted section (the tier is
+    // confidence, not the toggle), so its gate stays disabled.
+    assert.strictEqual(applyHigh.disabled, true, 'high-confidence action still unavailable');
     assert.ok(activeEl && activeEl !== document.body, 'focus restored after the re-render');
     assert.strictEqual(panel.contains(activeEl) || activeEl === modal, true, 'focus stays inside the modal');
 });

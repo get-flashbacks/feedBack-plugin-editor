@@ -857,4 +857,17 @@ export function _sectionSyncPlanPure(analysis, decisions, options = {}) {
         },
     };
 }
+
+/**
+ * The availability of the #26 "Apply all high-confidence" action. That button
+ * always commits the DEFAULT decision set (the confidence floor alone), so its
+ * gate must be read from the default plan — never from the user's current
+ * `decisions`, whose skips can clear a conflict the default plan still carries
+ * and enable a button whose click is then refused. True when the action would
+ * be refused: no trusted section, or a run-continuity conflict in that plan.
+ */
+export function _sectionSyncHighConfidenceDisabledPure(analysis) {
+    const plan = _sectionSyncPlanPure(analysis);
+    return plan.summary.high === 0 || plan.conflicts.length > 0;
+}
 /* @pure:section-sync:end */

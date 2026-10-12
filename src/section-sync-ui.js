@@ -16,7 +16,9 @@
 import { S } from './state.js';
 import { _ensureOnsetsShifted } from './audio.js';
 import { applyPerSectionSync } from './tempo.js';
-import { _alignSectionsPure, _sectionSyncPlanPure } from './section-sync.js';
+import {
+    _alignSectionsPure, _sectionSyncHighConfidenceDisabledPure, _sectionSyncPlanPure,
+} from './section-sync.js';
 import { _editorEscHtml, _installModalKeyboard, setStatus } from './ui.js';
 import { host } from './host.js';
 
@@ -223,5 +225,5 @@ function _renderSectionSync() {
             : 'Apply selected';
     }
     const highBtn = document.getElementById('editor-section-sync-apply-high');
-    if (highBtn) highBtn.disabled = plan.summary.high === 0 || plan.conflicts.length > 0;
+    if (highBtn) highBtn.disabled = _sectionSyncHighConfidenceDisabledPure(_analysis);
 }
