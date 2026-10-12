@@ -31,7 +31,7 @@ import {
     _zonesGet, _zonesSelect, _zonesShow, _zonesStripHit, _zonesZoneAt,
 } from './tempo-zones.js';
 import { beatOf, timeOf } from './beats.js';
-import { _alignSectionsPure, _buildPiecewiseMapPure, _chartDomainPure, _sectionRegionsPure } from './section-sync.js';
+import { _buildPiecewiseMapPure, _chartDomainPure } from './section-sync.js';
 import { DPR, canvas, ctx } from './canvas.js';
 import { _drumLaneIdxForPiece, _drumPieceCount } from './drum.js';
 import { LABEL_W, TIMELINE_TOP, WAVEFORM_H, timeToX, xToTime } from './geometry.js';
@@ -3999,16 +3999,14 @@ export class TempoPerSectionCmd {
         if (this.mapResult && this.mapResult.ok) {
             _eachTimed((o, tf, endKind) => {
                 if (typeof o[tf] !== 'number') return;
-                let skip = false;
                 const tOrig = o[tf];
+                let skip = false;
                 for (let i = 0; i < this.proposals.length; i++) {
                     const p = this.proposals[i];
                     const pEnd = p.end;
                     const domEnd = this.mapResult.domain ? this.mapResult.domain.end : tOrig;
-                    if (tOrig >= p.start - 1e-9 && (tOrig < pEnd - 1e-9 || (pEnd >= domEnd - 1e-9 && tOrig <= pEnd + 1e-9))) {
-                        if (!(p.ok && p.confidence >= this.confidenceFloor)) {
-                            skip = true;
-                        }
+                    if (tOrig >= p.start - 1e-9 && (tOrig < pEnd - 1e-9 || (tOrig <= pEnd + 1e-9 && pEnd >= domEnd - 1e-9))) {
+                        skip = !(p.ok && p.confidence >= this.confidenceFloor);
                         break;
                     }
                 }
