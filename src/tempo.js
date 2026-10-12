@@ -4017,7 +4017,11 @@ export class TempoPerSectionCmd {
                     if (endKind === 'sustain') {
                         if (typeof o.sustain === 'number' && o.sustain > 0) {
                             const ntEnd = this.mapResult.map(tOrig + o.sustain);
-                            o.sustain = Math.max(0, _r3((typeof ntEnd === 'number' && isFinite(ntEnd)) ? (ntEnd - nt) : o.sustain));
+                            if (typeof ntEnd === 'number' && isFinite(ntEnd)) {
+                                const mappedSustain = _r3(ntEnd - nt);
+                                if (mappedSustain <= 0) return;
+                                o.sustain = mappedSustain;
+                            }
                         }
                     } else if (endKind === 'span') {
                         if (typeof o.end_time === 'number') {
