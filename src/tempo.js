@@ -4001,11 +4001,11 @@ export class TempoPerSectionCmd {
                 if (typeof o[tf] !== 'number') return;
                 const tOrig = o[tf];
                 let skip = false;
+                const domEnd = this.mapResult.domain ? this.mapResult.domain.end : tOrig;
                 for (let i = 0; i < this.proposals.length; i++) {
                     const p = this.proposals[i];
-                    const pEnd = p.end;
-                    const domEnd = this.mapResult.domain ? this.mapResult.domain.end : tOrig;
-                    if (tOrig >= p.start - 1e-9 && (tOrig < pEnd - 1e-9 || (tOrig <= pEnd + 1e-9 && pEnd >= domEnd - 1e-9))) {
+                    const inInterval = tOrig >= p.start - 1e-9 && (tOrig < p.end - 1e-9 || (tOrig <= p.end + 1e-9 && p.end >= domEnd - 1e-9));
+                    if (inInterval) {
                         skip = !(p.ok && p.confidence >= this.confidenceFloor);
                         break;
                     }
@@ -4050,6 +4050,7 @@ export class TempoPerSectionCmd {
     }
 }
 
+export { _buildPiecewiseMapPure } from './section-sync.js';
 export function applyPerSectionSync(params) {
     const proposals = params.proposals;
     const confidenceFloor = params.confidenceFloor != null ? params.confidenceFloor : 0.7;
