@@ -677,6 +677,18 @@ export function _buildPiecewiseMapPure(proposals, domain, confidenceFloor = 0.7)
                 }
             }
         }
+        // Validate interior seams between adjacent accepted intervals within the run.
+        // Independent per-section fits can propose different target times at the shared boundary.
+        for (let k = runStart; k < runEnd; k++) {
+            const iv = temp[k];
+            const next = temp[k + 1];
+            const seam = iv.end;
+            const mappedFromLeft = iv.slope * seam + iv.intercept;
+            const mappedFromRight = next.slope * seam + next.intercept;
+            if (Math.abs(mappedFromLeft - mappedFromRight) > 1e-6) {
+                conflicts.push({ start: seam, end: seam, reason: 'seam-conflict' });
+            }
+        }
         runStart = runEnd + 1;
     }
     for (let i = 0; i < temp.length; i++) {
