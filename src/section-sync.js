@@ -35,6 +35,14 @@ import { _detectTempoFromOnsetsPure } from './sync-tempo.js';
 
 const EPS = 1e-9;
 
+// The confidence a section must clear before it is trusted (applied) WITHOUT an
+// explicit user choice (#26). The engine's own analysis floor is looser (0.5,
+// so a low-confidence section still surfaces for review); applying/baking uses
+// this stricter default so a "review and apply" run never silently carries a
+// marginal section. The review UI may override it per section (see
+// `_proposalAcceptedPure`'s `selected: true`), never for the whole run at once.
+export const SECTION_SYNC_CONFIDENCE_FLOOR = 0.7;
+
 function _clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
 function _round4(v) { return Math.round(v * 1e4) / 1e4; }
 function _median(sortedOrRaw) {
@@ -609,10 +617,18 @@ export function _alignSectionsPure(params) {
  * slope. A nonpositive slope would make the map non-monotone — event order
  * could reverse — so it is treated as inapplicable and its section skipped,
  * matching the design's rejection rule (PER-SECTION-SYNC-DESIGN.md L78-80).
+ *
+ * An explicit `selected` override from the #26 review UI wins over the
+ * confidence floor: `selected: false` is a hard skip (never applied), and
+ * `selected: true` forces a low-confidence (but otherwise usable) section
+ * through. The affine-validity checks are NOT overridable — a section with no
+ * finite, positive-slope line can never be applied, forced or not.
  */
-function _proposalAcceptedPure(p, confidenceFloor) {
+export function _proposalAcceptedPure(p, confidenceFloor) {
+    if (!p || p.selected === false) return false;
+    const forced = p.selected === true;
     return Boolean(p.ok)
-        && p.confidence >= confidenceFloor
+        && (forced || p.confidence >= confidenceFloor)
         && Number.isFinite(p.slope) && p.slope > 0
         && Number.isFinite(p.intercept);
 }
@@ -719,6 +735,7 @@ export function _buildPiecewiseMapPure(proposals, domain, confidenceFloor = 0.7)
     const intervals = sorted.map((p) => {
         const accepted = _proposalAcceptedPure(p, confidenceFloor);
         return {
+            index: p.index,
             start: p.start,
             end: p.end,
             slope: accepted ? p.slope : 1,
@@ -735,5 +752,122 @@ export function _buildPiecewiseMapPure(proposals, domain, confidenceFloor = 0.7)
         conflicts,
         map: (t) => _piecewiseAtPure(intervals, t),
     };
+}
+
+/**
+ * A human label for a review row: the section's authored name, else its number,
+ * else a positional fallback. An unnamed region in a multi-region song is the
+ * explicit lead-in before the first marker; an unnamed single region is the
+ * whole song (the uniform case).
+ */
+function _sectionLabelPure(p, count) {
+    if (p.name) return p.name;
+    if (Number.isFinite(p.number) && p.number) return `Section ${p.number}`;
+    if (count > 1) return p.index === 0 ? 'Lead-in' : `Section ${p.index + 1}`;
+    return 'Full song';
+}
+
+/**
+ * The #26 review model: given an `_alignSectionsPure` result and the user's
+ * per-section decisions, build the map "Apply" would commit plus one row per
+ * section for the UI. `decisions` maps a section `index` to `true` (apply) or
+ * `false` (skip); an ABSENT index follows the confidence default, so a
+ * low-confidence section is never applied unless the user explicitly selects
+ * it — the "default never applies low confidence" acceptance rule. A section
+ * with no usable fit (`ok:false`) is not selectable at all.
+ *
+ * Returns `{ok, reason, domain, confidenceFloor, proposals, map, rows,
+ * conflicts, summary}`. `proposals` are the decisions folded in and are
+ * exactly what the apply path (`applyPerSectionSync`) takes, so the preview and
+ * the committed edit are the same map.
+ */
+export function _sectionSyncPlanPure(analysis, decisions, options = {}) {
+    const confidenceFloor = options.confidenceFloor != null
+        ? options.confidenceFloor : SECTION_SYNC_CONFIDENCE_FLOOR;
+    if (!analysis || !analysis.ok) {
+        return {
+            ok: false,
+            reason: analysis && analysis.reason ? analysis.reason : 'no-analysis',
+            domain: analysis ? analysis.domain : null,
+            confidenceFloor,
+            proposals: [],
+            map: null,
+            rows: [],
+            conflicts: [],
+            summary: { sections: 0, applied: 0, high: 0, low: 0, failed: 0 },
+        };
+    }
+    const overrides = decisions || {};
+    const proposals = (analysis.proposals || []).map((p) => {
+        const over = overrides instanceof Map ? overrides.get(p.index) : overrides[p.index];
+        return over === undefined ? p : { ...p, selected: !!over };
+    });
+    const map = _buildPiecewiseMapPure(proposals, analysis.domain, confidenceFloor);
+    const intervalByIndex = new Map((map.intervals || []).map((iv) => [iv.index, iv]));
+    const rows = proposals.map((p) => {
+        const iv = intervalByIndex.get(p.index);
+        const trusted = _proposalAcceptedPure({ ...p, selected: undefined }, confidenceFloor);
+        // `wanted` is the decision intent (confidence default + explicit
+        // override, ignoring conflict demotion); `accepted` is what the builder
+        // actually commits after run continuity. They differ when a run is
+        // demoted to identity by a conflict, which the UI shows as a conflict.
+        const wanted = _proposalAcceptedPure(p, confidenceFloor);
+        const accepted = Boolean(iv && iv.accepted);
+        const slope = accepted && Number.isFinite(iv.slope) ? iv.slope : 1;
+        const intercept = accepted && Number.isFinite(iv.intercept) ? iv.intercept : 0;
+        const confidence = _clamp01(p.confidence || 0);
+        return {
+            index: p.index,
+            name: p.name || '',
+            number: Number.isFinite(p.number) ? p.number : 0,
+            label: _sectionLabelPure(p, proposals.length),
+            start: p.start,
+            end: p.end,
+            confidence,
+            confidencePct: Math.round(confidence * 100),
+            reason: p.reason || null,
+            // high = trusted by the confidence floor, low = analysed but below
+            // it, failed = no usable fit. A low row can still be forced on (see
+            // _proposalAcceptedPure); a failed row is not selectable.
+            tier: trusted ? 'high' : (p.ok ? 'low' : 'failed'),
+            forceable: _proposalAcceptedPure({ ...p, selected: true }, confidenceFloor),
+            wanted,
+            conflict: wanted && !accepted,
+            selected: accepted,
+            accepted,
+            factor: _round4(Number.isFinite(p.factor) ? p.factor : 1),
+            shift: _round4(slope * p.start + intercept - p.start),
+        };
+    });
+    return {
+        ok: true,
+        reason: null,
+        domain: analysis.domain,
+        confidenceFloor,
+        proposals,
+        map,
+        conflicts: map.conflicts || [],
+        rows,
+        summary: {
+            sections: rows.length,
+            applied: rows.filter((r) => r.accepted).length,
+            high: rows.filter((r) => r.tier === 'high').length,
+            low: rows.filter((r) => r.tier === 'low').length,
+            failed: rows.filter((r) => r.tier === 'failed').length,
+        },
+    };
+}
+
+/**
+ * The availability of the #26 "Apply all high-confidence" action. That button
+ * always commits the DEFAULT decision set (the confidence floor alone), so its
+ * gate must be read from the default plan — never from the user's current
+ * `decisions`, whose skips can clear a conflict the default plan still carries
+ * and enable a button whose click is then refused. True when the action would
+ * be refused: no trusted section, or a run-continuity conflict in that plan.
+ */
+export function _sectionSyncHighConfidenceDisabledPure(analysis) {
+    const plan = _sectionSyncPlanPure(analysis);
+    return plan.summary.high === 0 || plan.conflicts.length > 0;
 }
 /* @pure:section-sync:end */
