@@ -633,26 +633,24 @@ export function _buildPiecewiseMapPure(proposals, domain, confidenceFloor = 0.7)
             accepted,
         });
     }
-    // Enforce continuity: if a section is skipped, then W = identity there.
-    // An accepted section adjacent to skipped must be pinned to identity at the shared boundary.
+    // Enforce continuity: domain edges and skipped neighbours both impose W(t)=t
+    // at the shared seam. An accepted run pinned to identity at both edges is
+    // incompatible unless its slope is already 1 — in that case reject the run.
     for (let i = 0; i < temp.length; i++) {
         const iv = temp[i];
-        if (iv.accepted) {
-            // Check boundaries - if neighbor is skipped, constrain to pass through (boundary, boundary)
-            // Left boundary
-            if (i === 0) {
-                // Leftmost - if it would create jump from outside? domain start is identity by default
-            } else if (!temp[i - 1].accepted) {
-                // Previous is skipped; constrain iv so that W(iv.start) = iv.start (identity)
-                iv.intercept = iv.start - iv.slope * iv.start;
-            }
-            // Right boundary
-            if (i < temp.length - 1 && !temp[i + 1].accepted) {
-                // Next is skipped; constrain iv so that W(iv.end) = iv.end
-                iv.intercept = iv.end - iv.slope * iv.end;
-            } else if (i === temp.length - 1) {
-                // Last interval - also ensure continuity at domain end? not specified, but better to be consistent
-            }
+        if (!iv.accepted) continue;
+        const leftPinned = i === 0 || !temp[i - 1].accepted;
+        const rightPinned = i === temp.length - 1 || !temp[i + 1].accepted;
+        if (leftPinned && rightPinned) {
+            iv.accepted = false;
+            iv.slope = 1;
+            iv.intercept = 0;
+        } else if (leftPinned) {
+            const boundary = i === 0 ? domain.start : iv.start;
+            iv.intercept = boundary - iv.slope * boundary;
+        } else if (rightPinned) {
+            const boundary = i === temp.length - 1 ? domain.end : iv.end;
+            iv.intercept = boundary - iv.slope * boundary;
         }
     }
     for (let i = 0; i < temp.length; i++) {
