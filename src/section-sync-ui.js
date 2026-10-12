@@ -39,6 +39,10 @@ export function editorShowSectionSync() {
         return;
     }
     const onsets = _ensureOnsetsShifted() || [];
+    if (!onsets.length) {
+        setStatus('No audio onsets detected yet — cannot per-section sync.');
+        return;
+    }
     const analysis = _alignSectionsPure({
         sections: S.sections || [],
         beats: S.beats,
