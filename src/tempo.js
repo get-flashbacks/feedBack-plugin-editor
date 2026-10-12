@@ -3965,8 +3965,10 @@ export class TempoOffsetCmd extends TempoMapCmd {
 }
 
 export function _applyPerSectionSyncPure(mapResult, proposals, confidenceFloor = 0.7) {
-    if (!mapResult || !mapResult.ok) return false;
-    if (Array.isArray(mapResult.conflicts) && mapResult.conflicts.length) return false;
+    if (!mapResult || !mapResult.ok) return { applied: false, reason: 'bad-map' };
+    if (Array.isArray(mapResult.conflicts) && mapResult.conflicts.length) {
+        return { applied: false, reason: 'conflict', conflicts: mapResult.conflicts };
+    }
     const oldBeats = S.beats.map(b => ({ ...b }));
     const newBeats = S.beats.map(b => {
         const nt = mapResult.map(b.time);
@@ -3980,7 +3982,7 @@ export function _applyPerSectionSyncPure(mapResult, proposals, confidenceFloor =
     });
     const cmd = new TempoPerSectionCmd(oldBeats, newBeats, preTimes, proposals, mapResult, confidenceFloor);
     S.history.exec(cmd);
-    return true;
+    return { applied: true };
 }
 
 export class TempoPerSectionCmd {
@@ -4013,27 +4015,27 @@ export class TempoPerSectionCmd {
                 }
                 if (skip) return;
                 const nt = this.mapResult.map(tOrig);
-                if (typeof nt === 'number' && isFinite(nt)) {
-                    o[tf] = _r3(nt);
-                    if (endKind === 'sustain') {
-                        if (typeof o.sustain === 'number' && o.sustain > 0) {
-                            const ntEnd = this.mapResult.map(tOrig + o.sustain);
-                            if (typeof ntEnd === 'number' && isFinite(ntEnd)) {
-                                const mappedSustain = _r3(ntEnd - nt);
-                                if (mappedSustain <= 0) return;
-                                o.sustain = mappedSustain;
-                            }
-                        }
-                    } else if (endKind === 'span') {
-                        if (typeof o.end_time === 'number') {
-                            const ntEnd = this.mapResult.map(o.end_time);
-                            if (typeof ntEnd === 'number' && isFinite(ntEnd)) {
-                                if (ntEnd < nt) return;
-                                o.end_time = _r3(ntEnd);
-                            }
-                        }
+                if (!(typeof nt === 'number' && isFinite(nt))) return;
+                let mappedSustain = null;
+                let mappedEndTime = null;
+                if (endKind === 'sustain') {
+                    if (typeof o.sustain === 'number' && o.sustain > 0) {
+                        const ntEnd = this.mapResult.map(tOrig + o.sustain);
+                        if (!(typeof ntEnd === 'number' && isFinite(ntEnd))) return;
+                        mappedSustain = _r3(ntEnd - nt);
+                        if (mappedSustain <= 0) return;
+                    }
+                } else if (endKind === 'span') {
+                    if (typeof o.end_time === 'number') {
+                        const ntEnd = this.mapResult.map(o.end_time);
+                        if (!(typeof ntEnd === 'number' && isFinite(ntEnd))) return;
+                        if (ntEnd < nt) return;
+                        mappedEndTime = _r3(ntEnd);
                     }
                 }
+                o[tf] = _r3(nt);
+                if (mappedSustain !== null) o.sustain = mappedSustain;
+                if (mappedEndTime !== null) o.end_time = mappedEndTime;
             });
         }
         host.loopReprojectFromBeats(S.beats);
