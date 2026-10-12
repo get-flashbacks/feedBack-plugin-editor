@@ -40,6 +40,7 @@ import {
     _sectionRegionsPure, _localBpmFromBeatsPure, _dtwAlignPure,
     _slopeFromPairsPure, _fitAffinePure, _chartDomainPure,
     _collectSourceOnsetsPure, _alignSectionPure, _alignSectionsPure,
+    _buildPiecewiseMapPure,
 } from '../src/section-sync.js';
 
 let pass = 0, fail = 0;
@@ -380,6 +381,43 @@ t('a section whose first note is not on its marker keeps the marker place', () =
     const first = prop.anchors[0];
     assert.ok(first && Math.abs(first.source - 5) < 1e-9 && Math.abs(first.audio - 5) < 0.1,
         `first anchor lands on the first note (5,5), got ${JSON.stringify(first)}`);
+});
+
+// ── 5. Piecewise map builder: continuity only where skipped content pins it ──
+function acceptedIv(start, end, slope, intercept) {
+    return { start, end, slope, intercept, ok: true, confidence: 0.9 };
+}
+function skippedIv(start, end) {
+    return { start, end, slope: 1, intercept: 0, ok: false, confidence: 0 };
+}
+
+t('piecewise: a lone accepted section keeps its uniform affine map', () => {
+    const res = _buildPiecewiseMapPure([acceptedIv(0, 30, 2, 0)], { start: 0, end: 30 });
+    assert.strictEqual(res.ok, true);
+    assert.deepStrictEqual(res.conflicts, []);
+    assert.strictEqual(res.map(10), 20, 'a domain edge is not an identity pin, so the sole section is not demoted');
+});
+
+t('piecewise: adjacent accepted sections keep their proposals', () => {
+    const res = _buildPiecewiseMapPure([acceptedIv(0, 15, 2, 0), acceptedIv(15, 30, 2, 0)], { start: 0, end: 30 });
+    assert.deepStrictEqual(res.conflicts, []);
+    assert.ok(Math.abs(res.map(14.999) - 29.998) < 1e-6, `map(14.999) ${res.map(14.999)}`);
+    assert.ok(Math.abs(res.map(15) - 30) < 1e-9, `map(15) ${res.map(15)} — no backwards jump at the seam`);
+});
+
+t('piecewise: a run abutting a skipped section is pinned to identity at the seam', () => {
+    const res = _buildPiecewiseMapPure([skippedIv(0, 10), acceptedIv(10, 30, 2, 0)], { start: 0, end: 30 });
+    assert.deepStrictEqual(res.conflicts, []);
+    assert.ok(Math.abs(res.map(10) - 10) < 1e-9, `map(10) ${res.map(10)} — pinned to identity`);
+    assert.ok(Math.abs(res.map(20) - 30) < 1e-9, `map(20) ${res.map(20)} — run slope carried past the seam`);
+});
+
+t('piecewise: a both-sided-pinned incompatible run is exposed, never silently demoted', () => {
+    const res = _buildPiecewiseMapPure(
+        [skippedIv(0, 10), acceptedIv(10, 20, 2, 0), skippedIv(20, 30)], { start: 0, end: 30 });
+    assert.strictEqual(res.conflicts.length, 1, 'the identity conflict is exposed');
+    assert.strictEqual(res.conflicts[0].start, 10);
+    assert.strictEqual(res.conflicts[0].end, 20);
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

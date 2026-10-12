@@ -3966,6 +3966,7 @@ export class TempoOffsetCmd extends TempoMapCmd {
 
 export function _applyPerSectionSyncPure(mapResult, proposals, confidenceFloor = 0.7) {
     if (!mapResult || !mapResult.ok) return false;
+    if (Array.isArray(mapResult.conflicts) && mapResult.conflicts.length) return false;
     const oldBeats = S.beats.map(b => ({ ...b }));
     const newBeats = S.beats.map(b => {
         const nt = mapResult.map(b.time);

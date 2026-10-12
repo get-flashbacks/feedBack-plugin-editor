@@ -607,7 +607,12 @@ export function _alignSectionsPure(params) {
  * Build a piecewise map W(t) from accepted proposals for the given domain.
  * For each section interval [start,end) that is accepted (confidence >= floor),
  * the affine map is slope*x + intercept. Skipped intervals map as identity W(t)=t.
- * The map is continuous at boundaries by construction of accepted proposals.
+ * Continuity is enforced per accepted RUN: a run abutting a skipped interval is
+ * shifted so the shared seam maps to identity, while a run with no such seam
+ * keeps its proposal exactly (a lone accepted section uses the uniform affine
+ * map). A run pinned to identity at BOTH ends by skipped neighbours is a
+ * conflict unless it is already identity — exposed in `conflicts` rather than
+ * silently demoted.
  */
 export function _buildPiecewiseMapPure(proposals, domain, confidenceFloor = 0.7) {
     if (!domain || !Number.isFinite(domain.start) || !Number.isFinite(domain.end)) {
@@ -633,25 +638,46 @@ export function _buildPiecewiseMapPure(proposals, domain, confidenceFloor = 0.7)
             accepted,
         });
     }
-    // Enforce continuity: domain edges and skipped neighbours both impose W(t)=t
-    // at the shared seam. An accepted run pinned to identity at both edges is
-    // incompatible unless its slope is already 1 — in that case reject the run.
-    for (let i = 0; i < temp.length; i++) {
-        const iv = temp[i];
-        if (!iv.accepted) continue;
-        const leftPinned = i === 0 || !temp[i - 1].accepted;
-        const rightPinned = i === temp.length - 1 || !temp[i + 1].accepted;
-        if (leftPinned && rightPinned) {
-            iv.accepted = false;
-            iv.slope = 1;
-            iv.intercept = 0;
-        } else if (leftPinned) {
-            const boundary = i === 0 ? domain.start : iv.start;
-            iv.intercept = boundary - iv.slope * boundary;
-        } else if (rightPinned) {
-            const boundary = i === temp.length - 1 ? domain.end : iv.end;
-            iv.intercept = boundary - iv.slope * boundary;
+    // Enforce continuity. A skipped interval imposes W(t)=t throughout, both
+    // edges included, so an accepted RUN abutting one is pinned to identity at
+    // that shared seam. Shifting the whole run by one constant preserves its
+    // internal continuity. A run pinned at BOTH ends must be identity at both;
+    // a slope != 1 run cannot be, which is a conflict we expose, never demote
+    // silently. Being first or last in the list is NOT itself a pin — a lone
+    // accepted section covering the whole chart keeps its uniform affine map.
+    // Retained content bordering the domain is a pin, and so is a skipped
+    // neighbour.
+    const conflicts = [];
+    let runStart = 0;
+    while (runStart < temp.length) {
+        if (!temp[runStart].accepted) { runStart++; continue; }
+        let runEnd = runStart;
+        while (runEnd + 1 < temp.length && temp[runEnd + 1].accepted) runEnd++;
+        const first = temp[runStart];
+        const last = temp[runEnd];
+        const leftPinned = (runStart > 0 && !temp[runStart - 1].accepted)
+            || first.start > domain.start + EPS;
+        const rightPinned = (runEnd < temp.length - 1 && !temp[runEnd + 1].accepted)
+            || last.end < domain.end - EPS;
+        if (leftPinned || rightPinned) {
+            const anchor = leftPinned ? first.start : last.end;
+            const at = leftPinned
+                ? first.slope * first.start + first.intercept
+                : last.slope * last.end + last.intercept;
+            for (let k = runStart; k <= runEnd; k++) temp[k].intercept += anchor - at;
+            if (leftPinned && rightPinned) {
+                const atRight = last.slope * last.end + last.intercept;
+                if (Math.abs(atRight - last.end) > 1e-6) {
+                    conflicts.push({ start: first.start, end: last.end, reason: 'identity-conflict' });
+                    for (let k = runStart; k <= runEnd; k++) {
+                        temp[k].accepted = false;
+                        temp[k].slope = 1;
+                        temp[k].intercept = 0;
+                    }
+                }
+            }
         }
+        runStart = runEnd + 1;
     }
     for (let i = 0; i < temp.length; i++) {
         intervals.push(temp[i]);
@@ -660,6 +686,7 @@ export function _buildPiecewiseMapPure(proposals, domain, confidenceFloor = 0.7)
         ok: true,
         domain,
         intervals,
+        conflicts,
         map: (t) => {
             if (!Number.isFinite(t)) return t;
             // Find the interval containing t
