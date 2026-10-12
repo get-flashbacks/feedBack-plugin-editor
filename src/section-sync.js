@@ -698,29 +698,4 @@ export function _buildPiecewiseMapPure(proposals, domain, confidenceFloor = 0.7)
         },
     };
 }
-
-/** Apply the piecewise map to a time value, classifying by original onset section.
- * Objects starting in a skipped section retain their timing fields exactly.
- * For accepted sections, map the timestamp.
- */
-export function _applyTimeWithMap(t, mapResult, proposals, confidenceFloor = 0.7) {
-    if (!Number.isFinite(t)) return t;
-    // Find which proposal/section the time originates from based on start
-    if (!proposals || proposals.length === 0) {
-        return mapResult.ok ? mapResult.map(t) : t;
-    }
-    // Find the interval containing this original time
-    let skip = false;
-    for (let i = 0; i < proposals.length; i++) {
-        const p = proposals[i];
-        if (t >= p.start - 1e-9 && (t < p.end - 1e-9 || (p.end >= (mapResult.domain && mapResult.domain.end || t) - 1e-9 && t <= p.end + 1e-9))) {
-            if (!(p.ok && p.confidence >= confidenceFloor)) {
-                skip = true;
-            }
-            break;
-        }
-    }
-    if (skip) return t;
-    return mapResult.ok ? mapResult.map(t) : t;
-}
 /* @pure:section-sync:end */
