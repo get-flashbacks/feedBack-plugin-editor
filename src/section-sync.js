@@ -602,4 +602,138 @@ export function _alignSectionsPure(params) {
         proposals,
     };
 }
+
+/**
+ * A proposal is applicable when the engine marked it ok, it clears the
+ * confidence floor, and its affine line is finite with a strictly positive
+ * slope. A nonpositive slope would make the map non-monotone — event order
+ * could reverse — so it is treated as inapplicable and its section skipped,
+ * matching the design's rejection rule (PER-SECTION-SYNC-DESIGN.md L78-80).
+ */
+function _proposalAcceptedPure(p, confidenceFloor) {
+    return Boolean(p.ok)
+        && p.confidence >= confidenceFloor
+        && Number.isFinite(p.slope) && p.slope > 0
+        && Number.isFinite(p.intercept);
+}
+
+// Reconcile every interior seam of one accepted run in place: shift each later
+// section's phase so its line meets the previous section's mapped edge at the
+// shared boundary. Every section keeps its own slope (its tempo); only phase
+// moves, and a constant shift preserves the run's already-reconciled interior.
+// The fit noise this removes — independently fitted sections disagreeing by a
+// few ms at their seam — is not a conflict.
+function _reconcileRunSeamsPure(temp, runStart, runEnd) {
+    for (let k = runStart; k < runEnd; k++) {
+        const seam = temp[k].end;
+        const left = temp[k].slope * seam + temp[k].intercept;
+        for (let j = k + 1; j <= runEnd; j++) {
+            temp[j].intercept += left - (temp[j].slope * seam + temp[j].intercept);
+        }
+    }
+}
+
+// Pin one accepted run to identity where it abuts retained content — a skipped
+// neighbour or a domain edge — so a skipped interval's hard W(t)=t holds at the
+// shared seam. A run pinned at BOTH ends must be identity at both; a slope != 1
+// run cannot be, which is a conflict we expose (never demote silently). Being
+// first or last in the list is NOT itself a pin — a lone accepted section
+// covering the whole chart keeps its uniform affine map.
+function _pinRunToIdentityPure(temp, runStart, runEnd, domain, conflicts) {
+    const first = temp[runStart];
+    const last = temp[runEnd];
+    const leftPinned = (runStart > 0 && !temp[runStart - 1].accepted)
+        || first.start > domain.start + EPS;
+    const rightPinned = (runEnd < temp.length - 1 && !temp[runEnd + 1].accepted)
+        || last.end < domain.end - EPS;
+    if (!leftPinned && !rightPinned) return;
+    const anchor = leftPinned ? first.start : last.end;
+    const at = leftPinned
+        ? first.slope * first.start + first.intercept
+        : last.slope * last.end + last.intercept;
+    for (let k = runStart; k <= runEnd; k++) temp[k].intercept += anchor - at;
+    if (!leftPinned || !rightPinned) return;
+    const atRight = last.slope * last.end + last.intercept;
+    if (Math.abs(atRight - last.end) <= 1e-6) return;
+    conflicts.push({ start: first.start, end: last.end, reason: 'identity-conflict' });
+    for (let k = runStart; k <= runEnd; k++) {
+        temp[k].accepted = false;
+        temp[k].slope = 1;
+        temp[k].intercept = 0;
+    }
+}
+
+// Walk the accepted runs of `temp` in order, reconciling interior seams and
+// pinning each run to identity at any retained-content border. Mutates `temp`
+// in place; irreducible identity conflicts are appended to `conflicts`.
+function _enforceRunContinuityPure(temp, domain, conflicts) {
+    let runStart = 0;
+    while (runStart < temp.length) {
+        if (!temp[runStart].accepted) { runStart++; continue; }
+        let runEnd = runStart;
+        while (runEnd + 1 < temp.length && temp[runEnd + 1].accepted) runEnd++;
+        _reconcileRunSeamsPure(temp, runStart, runEnd);
+        _pinRunToIdentityPure(temp, runStart, runEnd, domain, conflicts);
+        runStart = runEnd + 1;
+    }
+}
+
+// Evaluate the piecewise map at `t`: the containing interval's affine line, the
+// first line below the domain and the last line above it. Intervals are sorted
+// and contiguous, so the first one whose end is past `t` contains it; a point on
+// a shared seam falls to the interval that starts there (both agree when the
+// seam was reconciled).
+function _piecewiseAtPure(intervals, t) {
+    if (!Number.isFinite(t) || intervals.length === 0) return t;
+    const first = intervals[0];
+    if (t <= first.start + 1e-9) return first.slope * t + first.intercept;
+    for (const iv of intervals) {
+        if (t < iv.end - 1e-9) return iv.slope * t + iv.intercept;
+    }
+    const last = intervals[intervals.length - 1];
+    return last.slope * t + last.intercept;
+}
+
+/**
+ * Build a piecewise map W(t) from accepted proposals for the given domain.
+ * For each section interval [start,end) that is accepted (confidence >= floor),
+ * the affine map is slope*x + intercept; skipped intervals map as identity.
+ * Continuity is enforced per accepted RUN: an interior seam between two accepted
+ * sections is reconciled to one target anchor (the later line's phase is shifted
+ * to meet the earlier one), so independently fitted sections form one continuous
+ * map instead of jumping. A run abutting a skipped interval is then shifted so
+ * the shared seam maps to identity, while a run with no such seam keeps its
+ * (now continuous) map, a lone accepted section using the uniform affine map. A
+ * run pinned to identity at BOTH ends by skipped neighbours is a conflict unless
+ * it is already identity — exposed in `conflicts` rather than silently demoted.
+ */
+export function _buildPiecewiseMapPure(proposals, domain, confidenceFloor = 0.7) {
+    if (!domain || !Number.isFinite(domain.start) || !Number.isFinite(domain.end)) {
+        return { ok: false, reason: 'bad-domain' };
+    }
+    const sorted = [...proposals].sort((a, b) => {
+        if (a.start < b.start - EPS) return -1;
+        if (a.start > b.start + EPS) return 1;
+        return 0;
+    });
+    const intervals = sorted.map((p) => {
+        const accepted = _proposalAcceptedPure(p, confidenceFloor);
+        return {
+            start: p.start,
+            end: p.end,
+            slope: accepted ? p.slope : 1,
+            intercept: accepted ? p.intercept : 0,
+            accepted,
+        };
+    });
+    const conflicts = [];
+    _enforceRunContinuityPure(intervals, domain, conflicts);
+    return {
+        ok: true,
+        domain,
+        intervals,
+        conflicts,
+        map: (t) => _piecewiseAtPure(intervals, t),
+    };
+}
 /* @pure:section-sync:end */

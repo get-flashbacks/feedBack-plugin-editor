@@ -24,6 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   song reduces to the existing uniform model. Analysis only — nothing bakes
   timestamps (#25) or surfaces in the UI (#26) yet.
 
+- **Per-section sync apply (#25): bake the accepted map into the chart.**
+  `applyPerSectionSync` and the undoable `TempoPerSectionCmd` turn the accepted
+  proposals into one continuous piecewise map and apply it song-wide: the beat
+  grid is remapped and every timed object is walked once, while objects starting
+  in a skipped or low-confidence section keep their exact original seconds.
+  Adjacent accepted sections are reconciled to a single target anchor at their
+  shared boundary, so ordinary fit noise never blocks Apply; a run pinned to
+  identity at both ends by skipped neighbours is still reported as a conflict.
+  API only — no UI wiring yet (#26).
+
 - **The undo stack is no longer invisible: a last-action label and a Revert
   button sit beside Undo/Redo (#43).** Every committed edit now names itself —
   the label is derived from the command's own class (or an explicit `label` on

@@ -86,6 +86,8 @@ import {
     editorApplySync, editorHideSyncDialog, editorSyncTempo, editorSyncUpdateFactor,
     getTabBPM
 } from './sync-tempo.js';
+import { applyPerSectionSync, _applyPerSectionSyncPure } from './tempo.js';
+import { _buildPiecewiseMapPure } from './section-sync.js';
 import {
     getMousePos, onDblClick, onMouseDown, onMouseMove, onMouseUp, onWheel
 } from './mouse.js';
@@ -737,6 +739,9 @@ window.editorToggleMapHealth = (force) => editorToggleMapHealth(force);
 window.editorSyncUpdateFactor = editorSyncUpdateFactor;
 window.editorHideSyncDialog = editorHideSyncDialog;
 window.editorApplySync = editorApplySync;
+window.applyPerSectionSync = applyPerSectionSync;
+window._applyPerSectionSyncPure = _applyPerSectionSyncPure;
+window._buildPiecewiseMapPure = _buildPiecewiseMapPure;
 
 // Tab preview (tab-preview.js owns the logic; HTML calls these by name).
 window.editorShowTabPreview = _editorShowTabPreview;

@@ -31,6 +31,7 @@ import {
     _zonesGet, _zonesSelect, _zonesShow, _zonesStripHit, _zonesZoneAt,
 } from './tempo-zones.js';
 import { beatOf, timeOf } from './beats.js';
+import { _buildPiecewiseMapPure, _chartDomainPure } from './section-sync.js';
 import { DPR, canvas, ctx } from './canvas.js';
 import { _drumLaneIdxForPiece, _drumPieceCount } from './drum.js';
 import { LABEL_W, TIMELINE_TOP, WAVEFORM_H, timeToX, xToTime } from './geometry.js';
@@ -3961,4 +3962,132 @@ export class TempoOffsetCmd extends TempoMapCmd {
         S.appliedOffset = this.prevApplied;
         this._syncOffsetInput();
     }
+}
+
+export function _applyPerSectionSyncPure(mapResult, proposals, confidenceFloor = 0.7) {
+    if (!mapResult || !mapResult.ok) return { applied: false, reason: 'bad-map' };
+    if (Array.isArray(mapResult.conflicts) && mapResult.conflicts.length) {
+        return { applied: false, reason: 'conflict', conflicts: mapResult.conflicts };
+    }
+    const oldBeats = S.beats.map(b => ({ ...b }));
+    const newBeats = S.beats.map(b => {
+        const nt = mapResult.map(b.time);
+        return { ...b, time: typeof nt === 'number' && isFinite(nt) ? nt : b.time };
+    });
+    const preTimes = [];
+    _eachTimed((o, tf, endKind) => {
+        preTimes.push([o, tf, o[tf],
+            endKind === 'sustain' ? o.sustain : endKind === 'span' ? o.end_time : undefined,
+            endKind]);
+    });
+    const cmd = new TempoPerSectionCmd(oldBeats, newBeats, preTimes, proposals, mapResult, confidenceFloor);
+    S.history.exec(cmd);
+    return { applied: true };
+}
+
+export class TempoPerSectionCmd {
+    constructor(oldBeats, newBeats, preTimes, proposals, mapResult, confidenceFloor = 0.7, label = 'per-section sync') {
+        this.oldBeats = oldBeats.map(b => ({ ...b }));
+        this.newBeats = newBeats.map(b => ({ ...b }));
+        this.preTimes = preTimes || [];
+        this.proposals = proposals || [];
+        this.mapResult = mapResult || { ok: false };
+        this.confidenceFloor = confidenceFloor;
+        this.label = label;
+        this.songScope = true;
+    }
+    exec() {
+        _liftAllBeats(this.oldBeats);
+        S.beats = this.newBeats.map(b => ({ ...b }));
+        if (this.mapResult && this.mapResult.ok) {
+            _eachTimed((o, tf, endKind) => this._mapTimed(o, tf, endKind));
+        }
+        host.loopReprojectFromBeats(S.beats);
+        host.renderLoopStrip();
+        host.updateLoopIn3DBtn();
+    }
+
+    // True when `tOrig` — an object's ORIGINAL onset — falls inside a section
+    // the builder did not accept (low confidence, nonpositive/non-finite slope,
+    // or a conflict demotion). Such an object keeps every timing field exactly
+    // (its span endpoint included), per the design's skip guarantee. Reading the
+    // builder's own per-interval decision keeps the apply predicate from
+    // drifting from the map: a section mapped as identity is left untouched.
+    _isSkipped(tOrig) {
+        const intervals = this.mapResult.intervals;
+        if (!Array.isArray(intervals)) return false;
+        const domEnd = this.mapResult.domain ? this.mapResult.domain.end : tOrig;
+        for (const iv of intervals) {
+            const inInterval = tOrig >= iv.start - 1e-9
+                && (tOrig < iv.end - 1e-9 || (tOrig <= iv.end + 1e-9 && iv.end >= domEnd - 1e-9));
+            if (inInterval) return !iv.accepted;
+        }
+        return false;
+    }
+
+    // Mapped sustain for a note starting at mapped `nt`; null when the mapped
+    // end is non-finite or the mapped duration is not strictly positive. The
+    // design rejects a zero/negative result rather than clamping or truncating
+    // a span that crosses into a skipped (identity) region.
+    _mappedSustain(o, tOrig, nt) {
+        const ntEnd = this.mapResult.map(tOrig + o.sustain);
+        if (!(typeof ntEnd === 'number' && isFinite(ntEnd))) return null;
+        const mapped = _r3(ntEnd - nt);
+        return mapped > 0 ? mapped : null;
+    }
+
+    // Mapped end_time for a span starting at mapped `nt`; null when the mapped
+    // end is non-finite or lands before the mapped start.
+    _mappedSpanEnd(o, nt) {
+        const ntEnd = this.mapResult.map(o.end_time);
+        if (!(typeof ntEnd === 'number' && isFinite(ntEnd))) return null;
+        if (ntEnd < nt) return null;
+        return _r3(ntEnd);
+    }
+
+    // Map one timed object in place. A skipped object is left untouched; a
+    // rejected sustain/span (or non-finite mapped start) refuses the whole
+    // object so no field is ever written from a partial mapping.
+    _mapTimed(o, tf, endKind) {
+        if (typeof o[tf] !== 'number') return;
+        const tOrig = o[tf];
+        if (this._isSkipped(tOrig)) return;
+        const nt = this.mapResult.map(tOrig);
+        if (!(typeof nt === 'number' && isFinite(nt))) return;
+        let mappedSustain = null;
+        let mappedEndTime = null;
+        if (endKind === 'sustain' && typeof o.sustain === 'number' && o.sustain > 0) {
+            mappedSustain = this._mappedSustain(o, tOrig, nt);
+            if (mappedSustain === null) return;
+        } else if (endKind === 'span' && typeof o.end_time === 'number') {
+            mappedEndTime = this._mappedSpanEnd(o, nt);
+            if (mappedEndTime === null) return;
+        }
+        o[tf] = _r3(nt);
+        if (mappedSustain !== null) o.sustain = mappedSustain;
+        if (mappedEndTime !== null) o.end_time = mappedEndTime;
+    }
+
+    rollback() {
+        S.beats = this.oldBeats.map(b => ({ ...b }));
+        for (const [o, tf, sec, endVal, endKind] of (this.preTimes || [])) {
+            o[tf] = sec;
+            if (endKind === 'sustain') {
+                if (endVal !== undefined) o.sustain = endVal;
+            } else if (endKind === 'span') {
+                if (endVal !== undefined) o.end_time = endVal;
+            }
+        }
+        host.loopReprojectFromBeats(S.beats);
+        host.renderLoopStrip();
+        host.updateLoopIn3DBtn();
+    }
+}
+
+export function applyPerSectionSync(params) {
+    const proposals = params.proposals;
+    const confidenceFloor = params.confidenceFloor != null ? params.confidenceFloor : 0.7;
+    const domain = params.domain || _chartDomainPure(S.beats);
+    const mapResult = _buildPiecewiseMapPure(proposals || [], domain, confidenceFloor);
+    return _applyPerSectionSyncPure(mapResult, proposals || [], confidenceFloor);
 }
