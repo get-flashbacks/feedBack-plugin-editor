@@ -620,25 +620,43 @@ export function _buildPiecewiseMapPure(proposals, domain, confidenceFloor = 0.7)
         if (a.start > b.start + EPS) return 1;
         return 0;
     });
+    // First pass: determine acceptance
+    const temp = [];
     for (let i = 0; i < sorted.length; i++) {
         const p = sorted[i];
-        if (p.ok && p.confidence >= confidenceFloor && Number.isFinite(p.slope) && Number.isFinite(p.intercept)) {
-            intervals.push({
-                start: p.start,
-                end: p.end,
-                slope: p.slope,
-                intercept: p.intercept,
-                accepted: true,
-            });
-        } else {
-            intervals.push({
-                start: p.start,
-                end: p.end,
-                slope: 1,
-                intercept: 0,
-                accepted: false,
-            });
+        const accepted = p.ok && p.confidence >= confidenceFloor && Number.isFinite(p.slope) && Number.isFinite(p.intercept);
+        temp.push({
+            start: p.start,
+            end: p.end,
+            slope: accepted ? p.slope : 1,
+            intercept: accepted ? p.intercept : 0,
+            accepted,
+        });
+    }
+    // Enforce continuity: if a section is skipped, then W = identity there.
+    // An accepted section adjacent to skipped must be pinned to identity at the shared boundary.
+    for (let i = 0; i < temp.length; i++) {
+        const iv = temp[i];
+        if (iv.accepted) {
+            // Check boundaries - if neighbor is skipped, constrain to pass through (boundary, boundary)
+            // Left boundary
+            if (i === 0) {
+                // Leftmost - if it would create jump from outside? domain start is identity by default
+            } else if (!temp[i - 1].accepted) {
+                // Previous is skipped; constrain iv so that W(iv.start) = iv.start (identity)
+                iv.intercept = iv.start - iv.slope * iv.start;
+            }
+            // Right boundary
+            if (i < temp.length - 1 && !temp[i + 1].accepted) {
+                // Next is skipped; constrain iv so that W(iv.end) = iv.end
+                iv.intercept = iv.end - iv.slope * iv.end;
+            } else if (i === temp.length - 1) {
+                // Last interval - also ensure continuity at domain end? not specified, but better to be consistent
+            }
         }
+    }
+    for (let i = 0; i < temp.length; i++) {
+        intervals.push(temp[i]);
     }
     return {
         ok: true,
