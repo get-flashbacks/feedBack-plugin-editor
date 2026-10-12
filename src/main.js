@@ -86,7 +86,8 @@ import {
     editorApplySync, editorHideSyncDialog, editorSyncTempo, editorSyncUpdateFactor,
     getTabBPM
 } from './sync-tempo.js';
-import { applyPerSectionSync, _applyPerSectionSyncPure, _buildPiecewiseMapPure } from './tempo.js';
+import { applyPerSectionSync, _applyPerSectionSyncPure } from './tempo.js';
+import { _buildPiecewiseMapPure } from './section-sync.js';
 import {
     getMousePos, onDblClick, onMouseDown, onMouseMove, onMouseUp, onWheel
 } from './mouse.js';

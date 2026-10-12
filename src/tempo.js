@@ -4050,7 +4050,6 @@ export class TempoPerSectionCmd {
     }
 }
 
-export { _buildPiecewiseMapPure } from './section-sync.js';
 export function applyPerSectionSync(params) {
     const proposals = params.proposals;
     const confidenceFloor = params.confidenceFloor != null ? params.confidenceFloor : 0.7;
