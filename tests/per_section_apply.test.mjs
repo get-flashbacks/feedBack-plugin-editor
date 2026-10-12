@@ -104,6 +104,33 @@ test('apply maps span endpoints and round-trips through undo then redo', () => {
     assert.strictEqual(s.arrangements[0].handshapes[0].end_time, 40, 'redo reproduces the mapped span');
 });
 
+test('a nonpositive-slope proposal is skipped on apply, not only by the builder', () => {
+    const s = scenario();
+    s.arrangements[0].notes = [
+        { time: 8, sustain: 5, midi: 60 },   // section A: ok but slope 0 → inapplicable
+        { time: 15, sustain: 1, midi: 62 },  // accepted section
+    ];
+    const props = [
+        { start: 0, end: 10, slope: 0, intercept: 5, ok: true, confidence: 0.9 },
+        accept(10, 30, 2, 0),
+    ];
+    const map = _buildPiecewiseMapPure(props, { start: 0, end: 30 });
+    assert.deepStrictEqual(map.conflicts, []);
+    // Slope 0 makes the proposal inapplicable, so section A maps as identity
+    // even though the neighbour's line would extrapolate past the seam.
+    assert.strictEqual(map.map(8), 8);
+    assert.strictEqual(map.map(13), 16);
+
+    const pre = { ...s.arrangements[0].notes[0] };
+    const res = _applyPerSectionSyncPure(map, props, 0.7);
+    assert.strictEqual(res.applied, true);
+
+    const notes = s.arrangements[0].notes;
+    assert.strictEqual(notes[0].time, pre.time, 'inapplicable-slope note onset untouched');
+    assert.strictEqual(notes[0].sustain, pre.sustain, 'sustain not recomputed from the accepted neighbour');
+    assert.strictEqual(notes[1].time, 20, 'accepted neighbour still baked');
+});
+
 test('a both-sided identity-pinned run blocks Apply with a surfaced conflict', () => {
     const s = scenario();
     const props = [skip(0, 10), accept(10, 20, 2, 0), skip(20, 30)];

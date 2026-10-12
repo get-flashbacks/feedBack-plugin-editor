@@ -4008,15 +4008,19 @@ export class TempoPerSectionCmd {
     }
 
     // True when `tOrig` — an object's ORIGINAL onset — falls inside a section
-    // whose proposal was not accepted. Such an object keeps every timing field
-    // exactly (its span endpoint included), per the design's skip guarantee.
+    // the builder did not accept (low confidence, nonpositive/non-finite slope,
+    // or a conflict demotion). Such an object keeps every timing field exactly
+    // (its span endpoint included), per the design's skip guarantee. Reading the
+    // builder's own per-interval decision keeps the apply predicate from
+    // drifting from the map: a section mapped as identity is left untouched.
     _isSkipped(tOrig) {
+        const intervals = this.mapResult.intervals;
+        if (!Array.isArray(intervals)) return false;
         const domEnd = this.mapResult.domain ? this.mapResult.domain.end : tOrig;
-        for (let i = 0; i < this.proposals.length; i++) {
-            const p = this.proposals[i];
-            const inInterval = tOrig >= p.start - 1e-9
-                && (tOrig < p.end - 1e-9 || (tOrig <= p.end + 1e-9 && p.end >= domEnd - 1e-9));
-            if (inInterval) return !(p.ok && p.confidence >= this.confidenceFloor);
+        for (const iv of intervals) {
+            const inInterval = tOrig >= iv.start - 1e-9
+                && (tOrig < iv.end - 1e-9 || (tOrig <= iv.end + 1e-9 && iv.end >= domEnd - 1e-9));
+            if (inInterval) return !iv.accepted;
         }
         return false;
     }
