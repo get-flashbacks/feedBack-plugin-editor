@@ -4027,6 +4027,7 @@ export class TempoPerSectionCmd {
                         if (typeof o.end_time === 'number') {
                             const ntEnd = this.mapResult.map(o.end_time);
                             if (typeof ntEnd === 'number' && isFinite(ntEnd)) {
+                                if (ntEnd < nt) return;
                                 o.end_time = _r3(ntEnd);
                             }
                         }
