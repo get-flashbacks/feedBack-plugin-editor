@@ -74,10 +74,12 @@ test('an explicit decision overrides the confidence default both ways', () => {
     // Force the low-confidence section on.
     const forced = _sectionSyncPlanPure(a, new Map([[1, true]]));
     assert.strictEqual(forced.rows[1].accepted, true, 'selected low-confidence section applies');
+    assert.strictEqual(forced.rows[1].wanted, true);
     assert.ok(forced.rows[1].tier === 'low', 'it stays labelled low even when forced');
     // Skip the trusted section.
     const skipped = _sectionSyncPlanPure(a, new Map([[0, false]]));
     assert.strictEqual(skipped.rows[0].accepted, false, 'deselected trusted section is skipped');
+    assert.strictEqual(skipped.rows[0].wanted, false);
 });
 
 test('a section with no usable fit is never selectable, even when forced', () => {
@@ -114,6 +116,17 @@ test('a run pinned to identity at both ends surfaces a conflict the UI can block
     assert.strictEqual(plan.conflicts.length, 1);
     assert.strictEqual(plan.conflicts[0].reason, 'identity-conflict');
     assert.strictEqual(plan.summary.applied, 0);
+    // The middle row still WANTS to apply (trusted, no user decision) but the
+    // conflict demotes it — the UI distinguishes the two so its toggle is not
+    // stuck reading "Skip".
+    const middle = plan.rows[1];
+    assert.strictEqual(middle.wanted, true);
+    assert.strictEqual(middle.accepted, false);
+    assert.strictEqual(middle.conflict, true);
+    // Skipping the middle section (the decision intent) removes the conflict.
+    const skipped = _sectionSyncPlanPure(a, new Map([[1, false]]));
+    assert.deepStrictEqual(skipped.conflicts, []);
+    assert.strictEqual(skipped.rows[1].wanted, false);
 });
 
 test('_proposalAcceptedPure honours selected overrides but never affine validity', () => {

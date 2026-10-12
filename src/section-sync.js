@@ -807,6 +807,11 @@ export function _sectionSyncPlanPure(analysis, decisions, options = {}) {
     const rows = proposals.map((p) => {
         const iv = intervalByIndex.get(p.index);
         const trusted = _proposalAcceptedPure({ ...p, selected: undefined }, confidenceFloor);
+        // `wanted` is the decision intent (confidence default + explicit
+        // override, ignoring conflict demotion); `accepted` is what the builder
+        // actually commits after run continuity. They differ when a run is
+        // demoted to identity by a conflict, which the UI shows as a conflict.
+        const wanted = _proposalAcceptedPure(p, confidenceFloor);
         const accepted = Boolean(iv && iv.accepted);
         const slope = accepted && Number.isFinite(iv.slope) ? iv.slope : 1;
         const intercept = accepted && Number.isFinite(iv.intercept) ? iv.intercept : 0;
@@ -826,6 +831,8 @@ export function _sectionSyncPlanPure(analysis, decisions, options = {}) {
             // _proposalAcceptedPure); a failed row is not selectable.
             tier: trusted ? 'high' : (p.ok ? 'low' : 'failed'),
             forceable: _proposalAcceptedPure({ ...p, selected: true }, confidenceFloor),
+            wanted,
+            conflict: wanted && !accepted,
             selected: accepted,
             accepted,
             factor: _round4(Number.isFinite(p.factor) ? p.factor : 1),

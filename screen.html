@@ -886,10 +886,11 @@
      never applied unless explicitly selected; "Apply all high-confidence" is the
      safe default. -->
 <div id="editor-section-sync-modal" class="hidden absolute inset-0 z-50 flex items-center justify-center" style="background:rgba(0,0,0,0.7)">
-    <div class="bg-dark-700 rounded-xl border border-gray-700 w-full max-w-lg flex flex-col max-h-[80vh]">
+    <div role="dialog" aria-modal="true" aria-labelledby="editor-section-sync-title"
+        class="bg-dark-700 rounded-xl border border-gray-700 w-full max-w-lg flex flex-col max-h-[80vh]">
         <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700">
-            <span class="text-sm font-medium">Per-section sync</span>
-            <button onclick="editorHideSectionSync()" class="text-gray-500 hover:text-white">&times;</button>
+            <span id="editor-section-sync-title" class="text-sm font-medium">Per-section sync</span>
+            <button type="button" onclick="editorHideSectionSync()" class="text-gray-500 hover:text-white">&times;</button>
         </div>
         <div class="px-4 pt-3 space-y-2 text-xs text-gray-400">
             Review each section's alignment. Low-confidence sections are skipped by
@@ -898,11 +899,11 @@
         </div>
         <div id="editor-section-sync-rows" class="px-4 py-2 overflow-y-auto"></div>
         <div class="flex gap-2 px-4 py-3 border-t border-gray-700">
-            <button id="editor-section-sync-apply-high" onclick="editorApplySectionSync(true)"
+            <button id="editor-section-sync-apply-high" type="button" onclick="editorApplySectionSync(true)"
                 class="flex-1 px-2 py-1.5 bg-dark-600 hover:bg-dark-500 rounded text-xs">Apply all high-confidence</button>
-            <button id="editor-section-sync-apply" onclick="editorApplySectionSync(false)"
+            <button id="editor-section-sync-apply" type="button" onclick="editorApplySectionSync(false)"
                 class="flex-1 px-2 py-1.5 bg-accent hover:bg-accent-light rounded text-xs disabled:opacity-50">Apply selected</button>
-            <button onclick="editorHideSectionSync()"
+            <button type="button" onclick="editorHideSectionSync()"
                 class="px-2 py-1.5 bg-dark-600 hover:bg-dark-500 rounded text-xs">Cancel</button>
         </div>
     </div>
