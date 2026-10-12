@@ -420,5 +420,18 @@ t('piecewise: a both-sided-pinned incompatible run is exposed, never silently de
     assert.strictEqual(res.conflicts[0].end, 20);
 });
 
+t('piecewise: the engine\'s own two-section fit reconciles its seam, never blocks Apply', () => {
+    // Regression: independently fitted sections disagree at their shared
+    // boundary by ordinary fit noise (~25 ms here). That is not a conflict —
+    // the builder must reconcile the seam into one continuous map, not refuse.
+    const res = analyze();
+    const map = _buildPiecewiseMapPure(res.proposals, res.domain, 0.7);
+    assert.deepStrictEqual(map.conflicts, [], 'fit noise at an accepted seam is reconciled, not flagged');
+    const seam = byName(res, 'Solo').start;
+    const left = map.map(seam - 1e-6), right = map.map(seam);
+    assert.ok(Math.abs(left - right) < 1e-3,
+        `continuous at the shared seam (${left.toFixed(4)} vs ${right.toFixed(4)})`);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

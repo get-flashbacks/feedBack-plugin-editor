@@ -607,12 +607,14 @@ export function _alignSectionsPure(params) {
  * Build a piecewise map W(t) from accepted proposals for the given domain.
  * For each section interval [start,end) that is accepted (confidence >= floor),
  * the affine map is slope*x + intercept. Skipped intervals map as identity W(t)=t.
- * Continuity is enforced per accepted RUN: a run abutting a skipped interval is
- * shifted so the shared seam maps to identity, while a run with no such seam
- * keeps its proposal exactly (a lone accepted section uses the uniform affine
- * map). A run pinned to identity at BOTH ends by skipped neighbours is a
- * conflict unless it is already identity — exposed in `conflicts` rather than
- * silently demoted.
+ * Continuity is enforced per accepted RUN: an interior seam between two accepted
+ * sections is reconciled to one target anchor (the later line's phase is shifted
+ * to meet the earlier one), so independently fitted sections form one continuous
+ * map instead of jumping. A run abutting a skipped interval is then shifted so
+ * the shared seam maps to identity, while a run with no such seam keeps its
+ * (now continuous) map, a lone accepted section using the uniform affine map. A
+ * run pinned to identity at BOTH ends by skipped neighbours is a conflict unless
+ * it is already identity — exposed in `conflicts` rather than silently demoted.
  */
 export function _buildPiecewiseMapPure(proposals, domain, confidenceFloor = 0.7) {
     if (!domain || !Number.isFinite(domain.start) || !Number.isFinite(domain.end)) {
@@ -638,21 +640,34 @@ export function _buildPiecewiseMapPure(proposals, domain, confidenceFloor = 0.7)
             accepted,
         });
     }
-    // Enforce continuity. A skipped interval imposes W(t)=t throughout, both
-    // edges included, so an accepted RUN abutting one is pinned to identity at
-    // that shared seam. Shifting the whole run by one constant preserves its
-    // internal continuity. A run pinned at BOTH ends must be identity at both;
-    // a slope != 1 run cannot be, which is a conflict we expose, never demote
-    // silently. Being first or last in the list is NOT itself a pin — a lone
-    // accepted section covering the whole chart keeps its uniform affine map.
-    // Retained content bordering the domain is a pin, and so is a skipped
-    // neighbour.
+    // Enforce continuity. Adjacent accepted sections are fitted independently,
+    // so their lines rarely agree at a shared boundary; reconcile each interior
+    // seam by shifting the later line's phase to meet the earlier line's mapped
+    // edge. Every section keeps its own slope (its tempo); only phase moves, and
+    // a constant shift preserves the run's already-reconciled interior. The fit
+    // noise this removes is not a conflict. A skipped interval then imposes
+    // W(t)=t throughout, both edges included, so an accepted RUN abutting one is
+    // pinned to identity at that shared seam. A run pinned at BOTH ends must be
+    // identity at both; a slope != 1 run cannot be, which is a conflict we
+    // expose, never demote silently. Being first or last in the list is NOT
+    // itself a pin — a lone accepted section covering the whole chart keeps its
+    // uniform affine map. Retained content bordering the domain is a pin, and so
+    // is a skipped neighbour.
     const conflicts = [];
     let runStart = 0;
     while (runStart < temp.length) {
         if (!temp[runStart].accepted) { runStart++; continue; }
         let runEnd = runStart;
         while (runEnd + 1 < temp.length && temp[runEnd + 1].accepted) runEnd++;
+        // One continuous line per accepted run: pin each later section to the
+        // mapped edge of the one before it at their shared seam.
+        for (let k = runStart; k < runEnd; k++) {
+            const seam = temp[k].end;
+            const left = temp[k].slope * seam + temp[k].intercept;
+            for (let j = k + 1; j <= runEnd; j++) {
+                temp[j].intercept += left - (temp[j].slope * seam + temp[j].intercept);
+            }
+        }
         const first = temp[runStart];
         const last = temp[runEnd];
         const leftPinned = (runStart > 0 && !temp[runStart - 1].accepted)
@@ -675,18 +690,6 @@ export function _buildPiecewiseMapPure(proposals, domain, confidenceFloor = 0.7)
                         temp[k].intercept = 0;
                     }
                 }
-            }
-        }
-        // Validate interior seams between adjacent accepted intervals within the run.
-        // Independent per-section fits can propose different target times at the shared boundary.
-        for (let k = runStart; k < runEnd; k++) {
-            const iv = temp[k];
-            const next = temp[k + 1];
-            const seam = iv.end;
-            const mappedFromLeft = iv.slope * seam + iv.intercept;
-            const mappedFromRight = next.slope * seam + next.intercept;
-            if (Math.abs(mappedFromLeft - mappedFromRight) > 1e-6) {
-                conflicts.push({ start: seam, end: seam, reason: 'seam-conflict' });
             }
         }
         runStart = runEnd + 1;
