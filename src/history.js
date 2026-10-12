@@ -30,6 +30,7 @@ import { isKeysMode, updatePianoRange, _rollReadOnly, _rollLockNotice } from './
 const _COMMAND_LABEL_OVERRIDES = Object.freeze({
     AudioShiftCmd: 'shift the recording',
     TempoOffsetCmd: 'nudge the audio offset',
+    TempoPerSectionCmd: 'apply per-section sync',
     TempoGridCmd: 'rebuild the beat grid',
     TempoMapCmd: 'edit the tempo map',
     TempoLockCmd: 'lock barlines',

@@ -602,4 +602,107 @@ export function _alignSectionsPure(params) {
         proposals,
     };
 }
+
+/**
+ * Build a piecewise map W(t) from accepted proposals for the given domain.
+ * For each section interval [start,end) that is accepted (confidence >= floor),
+ * the affine map is slope*x + intercept. Skipped intervals map as identity W(t)=t.
+ * The map is continuous at boundaries by construction of accepted proposals.
+ */
+export function _buildPiecewiseMapPure(proposals, domain, confidenceFloor = 0.7) {
+    if (!domain || !Number.isFinite(domain.start) || !Number.isFinite(domain.end)) {
+        return { ok: false, reason: 'bad-domain' };
+    }
+    // Build intervals in order
+    const intervals = [];
+    const sorted = [...proposals].sort((a, b) => {
+        if (a.start < b.start - EPS) return -1;
+        if (a.start > b.start + EPS) return 1;
+        return 0;
+    });
+    for (let i = 0; i < sorted.length; i++) {
+        const p = sorted[i];
+        if (p.ok && p.confidence >= confidenceFloor && Number.isFinite(p.slope) && Number.isFinite(p.intercept)) {
+            intervals.push({
+                start: p.start,
+                end: p.end,
+                slope: p.slope,
+                intercept: p.intercept,
+                accepted: true,
+            });
+        } else {
+            intervals.push({
+                start: p.start,
+                end: p.end,
+                slope: 1,
+                intercept: 0,
+                accepted: false,
+            });
+        }
+    }
+    return {
+        ok: true,
+        domain,
+        intervals,
+        map: (t) => {
+            if (!Number.isFinite(t)) return t;
+            // Find the interval containing t
+            for (let j = 0; j < intervals.length; j++) {
+                const iv = intervals[j];
+                if (t < iv.start - 1e-9) continue;
+                const isLast = j === intervals.length - 1;
+                // For interior points, t < iv.end means in this interval
+                if (t < iv.end - 1e-9) {
+                    return iv.slope * t + iv.intercept;
+                }
+                // At boundary t >= iv.end-1e-9 and t <= iv.end+1e-9
+                if (Math.abs(t - iv.end) < 1e-9) {
+                    // Boundary goes to the next interval if it starts at this point, else current
+                    if (!isLast && Math.abs(t - intervals[j+1].start) < 1e-9) {
+                        continue; // let next interval handle it
+                    }
+                    return iv.slope * t + iv.intercept;
+                }
+                if (isLast && t <= domain.end + 1e-9) {
+                    return iv.slope * t + iv.intercept;
+                }
+            }
+            // If t is before first interval start, use first interval's map if it starts at domain start?
+            if (intervals.length > 0 && t <= intervals[0].start + 1e-9) {
+                return intervals[0].slope * t + intervals[0].intercept;
+            }
+            // If t is after all, use last
+            if (intervals.length > 0) {
+                const last = intervals[intervals.length - 1];
+                return last.slope * t + last.intercept;
+            }
+            return t;
+        },
+    };
+}
+
+/** Apply the piecewise map to a time value, classifying by original onset section.
+ * Objects starting in a skipped section retain their timing fields exactly.
+ * For accepted sections, map the timestamp.
+ */
+export function _applyTimeWithMap(t, mapResult, proposals, confidenceFloor = 0.7) {
+    if (!Number.isFinite(t)) return t;
+    // Find which proposal/section the time originates from based on start
+    if (!proposals || proposals.length === 0) {
+        return mapResult.ok ? mapResult.map(t) : t;
+    }
+    // Find the interval containing this original time
+    let skip = false;
+    for (let i = 0; i < proposals.length; i++) {
+        const p = proposals[i];
+        if (t >= p.start - 1e-9 && (t < p.end - 1e-9 || (p.end >= (mapResult.domain && mapResult.domain.end || t) - 1e-9 && t <= p.end + 1e-9))) {
+            if (!(p.ok && p.confidence >= confidenceFloor)) {
+                skip = true;
+            }
+            break;
+        }
+    }
+    if (skip) return t;
+    return mapResult.ok ? mapResult.map(t) : t;
+}
 /* @pure:section-sync:end */

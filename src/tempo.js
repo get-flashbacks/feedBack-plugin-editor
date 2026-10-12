@@ -31,6 +31,7 @@ import {
     _zonesGet, _zonesSelect, _zonesShow, _zonesStripHit, _zonesZoneAt,
 } from './tempo-zones.js';
 import { beatOf, timeOf } from './beats.js';
+import { _alignSectionsPure, _buildPiecewiseMapPure, _chartDomainPure, _sectionRegionsPure } from './section-sync.js';
 import { DPR, canvas, ctx } from './canvas.js';
 import { _drumLaneIdxForPiece, _drumPieceCount } from './drum.js';
 import { LABEL_W, TIMELINE_TOP, WAVEFORM_H, timeToX, xToTime } from './geometry.js';
@@ -3961,4 +3962,100 @@ export class TempoOffsetCmd extends TempoMapCmd {
         S.appliedOffset = this.prevApplied;
         this._syncOffsetInput();
     }
+}
+
+export function _applyPerSectionSyncPure(mapResult, proposals, confidenceFloor = 0.7) {
+    if (!mapResult || !mapResult.ok) return false;
+    const oldBeats = S.beats.map(b => ({ ...b }));
+    const newBeats = S.beats.map(b => {
+        const nt = mapResult.map(b.time);
+        return { ...b, time: typeof nt === 'number' && isFinite(nt) ? nt : b.time };
+    });
+    const preTimes = [];
+    _eachTimed((o, tf, endKind) => {
+        preTimes.push([o, tf, o[tf],
+            endKind === 'sustain' ? o.sustain : endKind === 'span' ? o.end_time : undefined,
+            endKind]);
+    });
+    const cmd = new TempoPerSectionCmd(oldBeats, newBeats, preTimes, proposals, mapResult, confidenceFloor);
+    S.history.exec(cmd);
+    return true;
+}
+
+export class TempoPerSectionCmd {
+    constructor(oldBeats, newBeats, preTimes, proposals, mapResult, confidenceFloor = 0.7, label = 'per-section sync') {
+        this.oldBeats = oldBeats.map(b => ({ ...b }));
+        this.newBeats = newBeats.map(b => ({ ...b }));
+        this.preTimes = preTimes || [];
+        this.proposals = proposals || [];
+        this.mapResult = mapResult || { ok: false };
+        this.confidenceFloor = confidenceFloor;
+        this.label = label;
+        this.songScope = true;
+    }
+    exec() {
+        _liftAllBeats(this.oldBeats);
+        S.beats = this.newBeats.map(b => ({ ...b }));
+        if (this.mapResult && this.mapResult.ok) {
+            _eachTimed((o, tf, endKind) => {
+                if (typeof o[tf] !== 'number') return;
+                let skip = false;
+                const tOrig = o[tf];
+                for (let i = 0; i < this.proposals.length; i++) {
+                    const p = this.proposals[i];
+                    const pEnd = p.end;
+                    const domEnd = this.mapResult.domain ? this.mapResult.domain.end : tOrig;
+                    if (tOrig >= p.start - 1e-9 && (tOrig < pEnd - 1e-9 || (pEnd >= domEnd - 1e-9 && tOrig <= pEnd + 1e-9))) {
+                        if (!(p.ok && p.confidence >= this.confidenceFloor)) {
+                            skip = true;
+                        }
+                        break;
+                    }
+                }
+                if (skip) return;
+                const nt = this.mapResult.map(tOrig);
+                if (typeof nt === 'number' && isFinite(nt)) {
+                    o[tf] = _r3(nt);
+                    if (endKind === 'sustain') {
+                        if (typeof o.sustain === 'number' && o.sustain > 0) {
+                            const ntEnd = this.mapResult.map(tOrig + o.sustain);
+                            o.sustain = Math.max(0, _r3((typeof ntEnd === 'number' && isFinite(ntEnd)) ? (ntEnd - nt) : o.sustain));
+                        }
+                    } else if (endKind === 'span') {
+                        if (typeof o.end_time === 'number') {
+                            const ntEnd = this.mapResult.map(o.end_time);
+                            if (typeof ntEnd === 'number' && isFinite(ntEnd)) {
+                                o.end_time = _r3(ntEnd);
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        host.loopReprojectFromBeats(S.beats);
+        host.renderLoopStrip();
+        host.updateLoopIn3DBtn();
+    }
+    rollback() {
+        S.beats = this.oldBeats.map(b => ({ ...b }));
+        for (const [o, tf, sec, endVal, endKind] of (this.preTimes || [])) {
+            o[tf] = sec;
+            if (endKind === 'sustain') {
+                if (endVal !== undefined) o.sustain = endVal;
+            } else if (endKind === 'span') {
+                if (endVal !== undefined) o.end_time = endVal;
+            }
+        }
+        host.loopReprojectFromBeats(S.beats);
+        host.renderLoopStrip();
+        host.updateLoopIn3DBtn();
+    }
+}
+
+export function applyPerSectionSync(params) {
+    const proposals = params.proposals;
+    const confidenceFloor = params.confidenceFloor != null ? params.confidenceFloor : 0.7;
+    const domain = params.domain || _chartDomainPure(S.beats);
+    const mapResult = _buildPiecewiseMapPure(proposals || [], domain, confidenceFloor);
+    return _applyPerSectionSyncPure(mapResult, proposals || [], confidenceFloor);
 }
