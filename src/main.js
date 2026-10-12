@@ -89,6 +89,10 @@ import {
 import { applyPerSectionSync, _applyPerSectionSyncPure } from './tempo.js';
 import { _buildPiecewiseMapPure } from './section-sync.js';
 import {
+    editorApplySectionSync, editorHideSectionSync, editorShowSectionSync,
+    editorToggleSectionSync
+} from './section-sync-ui.js';
+import {
     getMousePos, onDblClick, onMouseDown, onMouseMove, onMouseUp, onWheel
 } from './mouse.js';
 import {
@@ -742,6 +746,12 @@ window.editorApplySync = editorApplySync;
 window.applyPerSectionSync = applyPerSectionSync;
 window._applyPerSectionSyncPure = _applyPerSectionSyncPure;
 window._buildPiecewiseMapPure = _buildPiecewiseMapPure;
+
+// Per-section sync review (#26) — section-sync-ui.js owns the logic.
+window.editorShowSectionSync = editorShowSectionSync;
+window.editorHideSectionSync = editorHideSectionSync;
+window.editorToggleSectionSync = editorToggleSectionSync;
+window.editorApplySectionSync = editorApplySectionSync;
 
 // Tab preview (tab-preview.js owns the logic; HTML calls these by name).
 window.editorShowTabPreview = _editorShowTabPreview;

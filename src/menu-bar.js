@@ -276,6 +276,7 @@ export const EDITOR_MENUS = Object.freeze([
         { sep: true },
         { cmd: 'songFit' },
         { label: 'Sync tempo to audio', fn: 'editorSyncTempo', audioOnly: true },
+        { label: 'Per-section sync (review sections)…', fn: 'editorShowSectionSync', audioOnly: true },
         { label: 'Scan for tempo zones…', fn: 'editorScanTempoZones', audioOnly: true },
         { label: 'Apply rough map from tempo zones', fn: 'editorApplyTempoZones', audioOnly: true },
         { label: 'Map Health (grid-vs-recording drift)', fn: 'editorToggleMapHealth', audioOnly: true },

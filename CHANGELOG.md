@@ -34,6 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identity at both ends by skipped neighbours is still reported as a conflict.
   API only — no UI wiring yet (#26).
 
+- **Per-section sync review UI (#26): apply or skip each section.** A new
+  "Per-section sync (review sections)…" item in the Tempo/Grid menu opens a
+  review list: one row per section with its confidence badge, the scale
+  factor/shift it would apply, and an Apply/Skip toggle. Low-confidence sections
+  default to skip and are never applied unless the user explicitly selects them;
+  failed sections are not selectable. "Apply all high-confidence" re-selects just
+  the trusted sections and bakes the accepted map through the same
+  `applyPerSectionSync` path as #25, so the preview and the committed edit are
+  one map. A single-section song collapses to the uniform model (one full-domain
+  row).
+
 - **The undo stack is no longer invisible: a last-action label and a Revert
   button sit beside Undo/Redo (#43).** Every committed edit now names itself —
   the label is derived from the command's own class (or an explicit `label` on
