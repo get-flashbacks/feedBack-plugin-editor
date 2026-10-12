@@ -604,9 +604,100 @@ export function _alignSectionsPure(params) {
 }
 
 /**
+ * A proposal is applicable when the engine marked it ok, it clears the
+ * confidence floor, and its affine line is finite with a strictly positive
+ * slope. A nonpositive slope would make the map non-monotone — event order
+ * could reverse — so it is treated as inapplicable and its section skipped,
+ * matching the design's rejection rule (PER-SECTION-SYNC-DESIGN.md L78-80).
+ */
+function _proposalAcceptedPure(p, confidenceFloor) {
+    return Boolean(p.ok)
+        && p.confidence >= confidenceFloor
+        && Number.isFinite(p.slope) && p.slope > 0
+        && Number.isFinite(p.intercept);
+}
+
+// Reconcile every interior seam of one accepted run in place: shift each later
+// section's phase so its line meets the previous section's mapped edge at the
+// shared boundary. Every section keeps its own slope (its tempo); only phase
+// moves, and a constant shift preserves the run's already-reconciled interior.
+// The fit noise this removes — independently fitted sections disagreeing by a
+// few ms at their seam — is not a conflict.
+function _reconcileRunSeamsPure(temp, runStart, runEnd) {
+    for (let k = runStart; k < runEnd; k++) {
+        const seam = temp[k].end;
+        const left = temp[k].slope * seam + temp[k].intercept;
+        for (let j = k + 1; j <= runEnd; j++) {
+            temp[j].intercept += left - (temp[j].slope * seam + temp[j].intercept);
+        }
+    }
+}
+
+// Pin one accepted run to identity where it abuts retained content — a skipped
+// neighbour or a domain edge — so a skipped interval's hard W(t)=t holds at the
+// shared seam. A run pinned at BOTH ends must be identity at both; a slope != 1
+// run cannot be, which is a conflict we expose (never demote silently). Being
+// first or last in the list is NOT itself a pin — a lone accepted section
+// covering the whole chart keeps its uniform affine map.
+function _pinRunToIdentityPure(temp, runStart, runEnd, domain, conflicts) {
+    const first = temp[runStart];
+    const last = temp[runEnd];
+    const leftPinned = (runStart > 0 && !temp[runStart - 1].accepted)
+        || first.start > domain.start + EPS;
+    const rightPinned = (runEnd < temp.length - 1 && !temp[runEnd + 1].accepted)
+        || last.end < domain.end - EPS;
+    if (!leftPinned && !rightPinned) return;
+    const anchor = leftPinned ? first.start : last.end;
+    const at = leftPinned
+        ? first.slope * first.start + first.intercept
+        : last.slope * last.end + last.intercept;
+    for (let k = runStart; k <= runEnd; k++) temp[k].intercept += anchor - at;
+    if (!leftPinned || !rightPinned) return;
+    const atRight = last.slope * last.end + last.intercept;
+    if (Math.abs(atRight - last.end) <= 1e-6) return;
+    conflicts.push({ start: first.start, end: last.end, reason: 'identity-conflict' });
+    for (let k = runStart; k <= runEnd; k++) {
+        temp[k].accepted = false;
+        temp[k].slope = 1;
+        temp[k].intercept = 0;
+    }
+}
+
+// Walk the accepted runs of `temp` in order, reconciling interior seams and
+// pinning each run to identity at any retained-content border. Mutates `temp`
+// in place; irreducible identity conflicts are appended to `conflicts`.
+function _enforceRunContinuityPure(temp, domain, conflicts) {
+    let runStart = 0;
+    while (runStart < temp.length) {
+        if (!temp[runStart].accepted) { runStart++; continue; }
+        let runEnd = runStart;
+        while (runEnd + 1 < temp.length && temp[runEnd + 1].accepted) runEnd++;
+        _reconcileRunSeamsPure(temp, runStart, runEnd);
+        _pinRunToIdentityPure(temp, runStart, runEnd, domain, conflicts);
+        runStart = runEnd + 1;
+    }
+}
+
+// Evaluate the piecewise map at `t`: the containing interval's affine line, the
+// first line below the domain and the last line above it. Intervals are sorted
+// and contiguous, so the first one whose end is past `t` contains it; a point on
+// a shared seam falls to the interval that starts there (both agree when the
+// seam was reconciled).
+function _piecewiseAtPure(intervals, t) {
+    if (!Number.isFinite(t) || intervals.length === 0) return t;
+    const first = intervals[0];
+    if (t <= first.start + 1e-9) return first.slope * t + first.intercept;
+    for (const iv of intervals) {
+        if (t < iv.end - 1e-9) return iv.slope * t + iv.intercept;
+    }
+    const last = intervals[intervals.length - 1];
+    return last.slope * t + last.intercept;
+}
+
+/**
  * Build a piecewise map W(t) from accepted proposals for the given domain.
  * For each section interval [start,end) that is accepted (confidence >= floor),
- * the affine map is slope*x + intercept. Skipped intervals map as identity W(t)=t.
+ * the affine map is slope*x + intercept; skipped intervals map as identity.
  * Continuity is enforced per accepted RUN: an interior seam between two accepted
  * sections is reconciled to one target anchor (the later line's phase is shifted
  * to meet the earlier one), so independently fitted sections form one continuous
@@ -620,122 +711,29 @@ export function _buildPiecewiseMapPure(proposals, domain, confidenceFloor = 0.7)
     if (!domain || !Number.isFinite(domain.start) || !Number.isFinite(domain.end)) {
         return { ok: false, reason: 'bad-domain' };
     }
-    // Build intervals in order
-    const intervals = [];
     const sorted = [...proposals].sort((a, b) => {
         if (a.start < b.start - EPS) return -1;
         if (a.start > b.start + EPS) return 1;
         return 0;
     });
-    // First pass: determine acceptance
-    const temp = [];
-    for (let i = 0; i < sorted.length; i++) {
-        const p = sorted[i];
-        const accepted = p.ok && p.confidence >= confidenceFloor && Number.isFinite(p.slope) && Number.isFinite(p.intercept);
-        temp.push({
+    const intervals = sorted.map((p) => {
+        const accepted = _proposalAcceptedPure(p, confidenceFloor);
+        return {
             start: p.start,
             end: p.end,
             slope: accepted ? p.slope : 1,
             intercept: accepted ? p.intercept : 0,
             accepted,
-        });
-    }
-    // Enforce continuity. Adjacent accepted sections are fitted independently,
-    // so their lines rarely agree at a shared boundary; reconcile each interior
-    // seam by shifting the later line's phase to meet the earlier line's mapped
-    // edge. Every section keeps its own slope (its tempo); only phase moves, and
-    // a constant shift preserves the run's already-reconciled interior. The fit
-    // noise this removes is not a conflict. A skipped interval then imposes
-    // W(t)=t throughout, both edges included, so an accepted RUN abutting one is
-    // pinned to identity at that shared seam. A run pinned at BOTH ends must be
-    // identity at both; a slope != 1 run cannot be, which is a conflict we
-    // expose, never demote silently. Being first or last in the list is NOT
-    // itself a pin — a lone accepted section covering the whole chart keeps its
-    // uniform affine map. Retained content bordering the domain is a pin, and so
-    // is a skipped neighbour.
+        };
+    });
     const conflicts = [];
-    let runStart = 0;
-    while (runStart < temp.length) {
-        if (!temp[runStart].accepted) { runStart++; continue; }
-        let runEnd = runStart;
-        while (runEnd + 1 < temp.length && temp[runEnd + 1].accepted) runEnd++;
-        // One continuous line per accepted run: pin each later section to the
-        // mapped edge of the one before it at their shared seam.
-        for (let k = runStart; k < runEnd; k++) {
-            const seam = temp[k].end;
-            const left = temp[k].slope * seam + temp[k].intercept;
-            for (let j = k + 1; j <= runEnd; j++) {
-                temp[j].intercept += left - (temp[j].slope * seam + temp[j].intercept);
-            }
-        }
-        const first = temp[runStart];
-        const last = temp[runEnd];
-        const leftPinned = (runStart > 0 && !temp[runStart - 1].accepted)
-            || first.start > domain.start + EPS;
-        const rightPinned = (runEnd < temp.length - 1 && !temp[runEnd + 1].accepted)
-            || last.end < domain.end - EPS;
-        if (leftPinned || rightPinned) {
-            const anchor = leftPinned ? first.start : last.end;
-            const at = leftPinned
-                ? first.slope * first.start + first.intercept
-                : last.slope * last.end + last.intercept;
-            for (let k = runStart; k <= runEnd; k++) temp[k].intercept += anchor - at;
-            if (leftPinned && rightPinned) {
-                const atRight = last.slope * last.end + last.intercept;
-                if (Math.abs(atRight - last.end) > 1e-6) {
-                    conflicts.push({ start: first.start, end: last.end, reason: 'identity-conflict' });
-                    for (let k = runStart; k <= runEnd; k++) {
-                        temp[k].accepted = false;
-                        temp[k].slope = 1;
-                        temp[k].intercept = 0;
-                    }
-                }
-            }
-        }
-        runStart = runEnd + 1;
-    }
-    for (let i = 0; i < temp.length; i++) {
-        intervals.push(temp[i]);
-    }
+    _enforceRunContinuityPure(intervals, domain, conflicts);
     return {
         ok: true,
         domain,
         intervals,
         conflicts,
-        map: (t) => {
-            if (!Number.isFinite(t)) return t;
-            // Find the interval containing t
-            for (let j = 0; j < intervals.length; j++) {
-                const iv = intervals[j];
-                if (t < iv.start - 1e-9) continue;
-                const isLast = j === intervals.length - 1;
-                // For interior points, t < iv.end means in this interval
-                if (t < iv.end - 1e-9) {
-                    return iv.slope * t + iv.intercept;
-                }
-                // At boundary t >= iv.end-1e-9 and t <= iv.end+1e-9
-                if (Math.abs(t - iv.end) < 1e-9) {
-                    // Boundary goes to the next interval if it starts at this point, else current
-                    if (!isLast && Math.abs(t - intervals[j+1].start) < 1e-9) {
-                        continue; // let next interval handle it
-                    }
-                    return iv.slope * t + iv.intercept;
-                }
-                if (isLast && t <= domain.end + 1e-9) {
-                    return iv.slope * t + iv.intercept;
-                }
-            }
-            // If t is before first interval start, use first interval's map if it starts at domain start?
-            if (intervals.length > 0 && t <= intervals[0].start + 1e-9) {
-                return intervals[0].slope * t + intervals[0].intercept;
-            }
-            // If t is after all, use last
-            if (intervals.length > 0) {
-                const last = intervals[intervals.length - 1];
-                return last.slope * t + last.intercept;
-            }
-            return t;
-        },
+        map: (t) => _piecewiseAtPure(intervals, t),
     };
 }
 /* @pure:section-sync:end */

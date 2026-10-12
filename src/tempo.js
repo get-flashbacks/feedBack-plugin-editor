@@ -4000,48 +4000,70 @@ export class TempoPerSectionCmd {
         _liftAllBeats(this.oldBeats);
         S.beats = this.newBeats.map(b => ({ ...b }));
         if (this.mapResult && this.mapResult.ok) {
-            _eachTimed((o, tf, endKind) => {
-                if (typeof o[tf] !== 'number') return;
-                const tOrig = o[tf];
-                let skip = false;
-                const domEnd = this.mapResult.domain ? this.mapResult.domain.end : tOrig;
-                for (let i = 0; i < this.proposals.length; i++) {
-                    const p = this.proposals[i];
-                    const inInterval = tOrig >= p.start - 1e-9 && (tOrig < p.end - 1e-9 || (tOrig <= p.end + 1e-9 && p.end >= domEnd - 1e-9));
-                    if (inInterval) {
-                        skip = !(p.ok && p.confidence >= this.confidenceFloor);
-                        break;
-                    }
-                }
-                if (skip) return;
-                const nt = this.mapResult.map(tOrig);
-                if (!(typeof nt === 'number' && isFinite(nt))) return;
-                let mappedSustain = null;
-                let mappedEndTime = null;
-                if (endKind === 'sustain') {
-                    if (typeof o.sustain === 'number' && o.sustain > 0) {
-                        const ntEnd = this.mapResult.map(tOrig + o.sustain);
-                        if (!(typeof ntEnd === 'number' && isFinite(ntEnd))) return;
-                        mappedSustain = _r3(ntEnd - nt);
-                        if (mappedSustain <= 0) return;
-                    }
-                } else if (endKind === 'span') {
-                    if (typeof o.end_time === 'number') {
-                        const ntEnd = this.mapResult.map(o.end_time);
-                        if (!(typeof ntEnd === 'number' && isFinite(ntEnd))) return;
-                        if (ntEnd < nt) return;
-                        mappedEndTime = _r3(ntEnd);
-                    }
-                }
-                o[tf] = _r3(nt);
-                if (mappedSustain !== null) o.sustain = mappedSustain;
-                if (mappedEndTime !== null) o.end_time = mappedEndTime;
-            });
+            _eachTimed((o, tf, endKind) => this._mapTimed(o, tf, endKind));
         }
         host.loopReprojectFromBeats(S.beats);
         host.renderLoopStrip();
         host.updateLoopIn3DBtn();
     }
+
+    // True when `tOrig` — an object's ORIGINAL onset — falls inside a section
+    // whose proposal was not accepted. Such an object keeps every timing field
+    // exactly (its span endpoint included), per the design's skip guarantee.
+    _isSkipped(tOrig) {
+        const domEnd = this.mapResult.domain ? this.mapResult.domain.end : tOrig;
+        for (let i = 0; i < this.proposals.length; i++) {
+            const p = this.proposals[i];
+            const inInterval = tOrig >= p.start - 1e-9
+                && (tOrig < p.end - 1e-9 || (tOrig <= p.end + 1e-9 && p.end >= domEnd - 1e-9));
+            if (inInterval) return !(p.ok && p.confidence >= this.confidenceFloor);
+        }
+        return false;
+    }
+
+    // Mapped sustain for a note starting at mapped `nt`; null when the mapped
+    // end is non-finite or the mapped duration is not strictly positive. The
+    // design rejects a zero/negative result rather than clamping or truncating
+    // a span that crosses into a skipped (identity) region.
+    _mappedSustain(o, tOrig, nt) {
+        const ntEnd = this.mapResult.map(tOrig + o.sustain);
+        if (!(typeof ntEnd === 'number' && isFinite(ntEnd))) return null;
+        const mapped = _r3(ntEnd - nt);
+        return mapped > 0 ? mapped : null;
+    }
+
+    // Mapped end_time for a span starting at mapped `nt`; null when the mapped
+    // end is non-finite or lands before the mapped start.
+    _mappedSpanEnd(o, nt) {
+        const ntEnd = this.mapResult.map(o.end_time);
+        if (!(typeof ntEnd === 'number' && isFinite(ntEnd))) return null;
+        if (ntEnd < nt) return null;
+        return _r3(ntEnd);
+    }
+
+    // Map one timed object in place. A skipped object is left untouched; a
+    // rejected sustain/span (or non-finite mapped start) refuses the whole
+    // object so no field is ever written from a partial mapping.
+    _mapTimed(o, tf, endKind) {
+        if (typeof o[tf] !== 'number') return;
+        const tOrig = o[tf];
+        if (this._isSkipped(tOrig)) return;
+        const nt = this.mapResult.map(tOrig);
+        if (!(typeof nt === 'number' && isFinite(nt))) return;
+        let mappedSustain = null;
+        let mappedEndTime = null;
+        if (endKind === 'sustain' && typeof o.sustain === 'number' && o.sustain > 0) {
+            mappedSustain = this._mappedSustain(o, tOrig, nt);
+            if (mappedSustain === null) return;
+        } else if (endKind === 'span' && typeof o.end_time === 'number') {
+            mappedEndTime = this._mappedSpanEnd(o, nt);
+            if (mappedEndTime === null) return;
+        }
+        o[tf] = _r3(nt);
+        if (mappedSustain !== null) o.sustain = mappedSustain;
+        if (mappedEndTime !== null) o.end_time = mappedEndTime;
+    }
+
     rollback() {
         S.beats = this.oldBeats.map(b => ({ ...b }));
         for (const [o, tf, sec, endVal, endKind] of (this.preTimes || [])) {

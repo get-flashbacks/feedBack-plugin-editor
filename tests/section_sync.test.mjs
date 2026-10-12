@@ -433,5 +433,31 @@ t('piecewise: the engine\'s own two-section fit reconciles its seam, never block
         `continuous at the shared seam (${left.toFixed(4)} vs ${right.toFixed(4)})`);
 });
 
+t('piecewise: a nonpositive-slope proposal is skipped, never used to reverse order', () => {
+    // The design makes a nonpositive slope inapplicable (L78-80): accepting it
+    // would bake a flat or backwards section and reverse event order on apply.
+    const res = _buildPiecewiseMapPure(
+        [acceptedIv(0, 15, 0, 5), acceptedIv(15, 30, 2, 0)], { start: 0, end: 30 });
+    assert.deepStrictEqual(res.conflicts, []);
+    assert.strictEqual(res.map(10), 10, 'the slope-0 section falls back to identity, not the constant 5');
+    assert.strictEqual(res.map(15), 15, 'the accepted run is pinned to identity at the skipped seam');
+    assert.strictEqual(res.map(30), 45, 'and keeps its slope past the seam');
+});
+
+t('piecewise: a reconciled seam of differing slopes stays strictly increasing', () => {
+    // Independently fitted sections with different tempos are reconciled to one
+    // continuous line; with positive slopes that guarantees no event-order
+    // reversal at the seam.
+    const res = _buildPiecewiseMapPure(
+        [acceptedIv(0, 15, 1.2, 0), acceptedIv(15, 30, 0.8, 0)], { start: 0, end: 30 });
+    assert.deepStrictEqual(res.conflicts, []);
+    assert.ok(Math.abs(res.map(15) - 18) < 1e-9, `seam target ${res.map(15)}`);
+    const xs = [0, 5, 10, 14.999, 15, 15.001, 20, 25, 30];
+    const ys = xs.map((x) => res.map(x));
+    for (let i = 1; i < ys.length; i++) {
+        assert.ok(ys[i] > ys[i - 1], `strictly increasing at ${xs[i]} (${ys[i - 1]} -> ${ys[i]})`);
+    }
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
